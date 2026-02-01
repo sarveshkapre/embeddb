@@ -9,6 +9,7 @@ repository.workspace = true
 anyhow.workspace = true
 axum = { workspace = true, optional = true }
 embeddb = { path = "../embeddb" }
+jsonschema = { version = "0.17", optional = true }
 serde.workspace = true
 serde_json.workspace = true
 tokio = { workspace = true, optional = true }
@@ -18,3 +19,4 @@ tracing-subscriber.workspace = true
 
 [features]
 http = ["dep:axum", "dep:tokio", "dep:tower-http"]
+contract-tests = ["dep:jsonschema"]

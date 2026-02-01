@@ -13,6 +13,7 @@
 ## HTTP server (optional)
 - Run: `cargo run -p embeddb-server --features http`
 - Env: `EMBEDDB_ADDR=127.0.0.1:8080`, `EMBEDDB_DATA_DIR=./data`
+- Contract tests: `cargo test -p embeddb-server --features contract-tests`
 
 ## Next 3 improvements
 1. Add SST flush + compaction (LSM basics)

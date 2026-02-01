@@ -29,6 +29,175 @@ use axum::{
 #[cfg(feature = "http")]
 use tower_http::trace::TraceLayer;
 
+#[cfg(all(test, feature = "contract-tests"))]
+mod contract_tests {
+    use jsonschema::JSONSchema;
+    use serde_json::Value;
+
+    fn compile_schema(schema: Value) -> JSONSchema {
+        JSONSchema::compile(&schema).expect("schema should compile")
+    }
+
+    #[test]
+    fn create_table_request_schema() {
+        let schema = serde_json::json!({
+            "type": "object",
+            "required": ["name", "schema"],
+            "properties": {
+                "name": { "type": "string", "minLength": 1 },
+                "schema": {
+                    "type": "object",
+                    "required": ["columns"],
+                    "properties": {
+                        "columns": {
+                            "type": "array",
+                            "minItems": 1,
+                            "items": {
+                                "type": "object",
+                                "required": ["name", "data_type", "nullable"],
+                                "properties": {
+                                    "name": { "type": "string", "minLength": 1 },
+                                    "data_type": {
+                                        "type": "string",
+                                        "enum": ["Int", "Float", "Bool", "String", "Bytes"]
+                                    },
+                                    "nullable": { "type": "boolean" }
+                                }
+                            }
+                        }
+                    }
+                },
+                "embedding_fields": {
+                    "type": "array",
+                    "items": { "type": "string", "minLength": 1 }
+                }
+            }
+        });
+
+        let validator = compile_schema(schema);
+
+        let valid = serde_json::json!({
+            "name": "notes",
+            "schema": {
+                "columns": [
+                    { "name": "title", "data_type": "String", "nullable": false }
+                ]
+            },
+            "embedding_fields": ["title"]
+        });
+        assert!(validator.is_valid(&valid));
+
+        let invalid = serde_json::json!({
+            "schema": {
+                "columns": [
+                    { "name": "title", "data_type": "String", "nullable": false }
+                ]
+            }
+        });
+        assert!(!validator.is_valid(&invalid));
+    }
+
+    #[test]
+    fn insert_row_request_schema() {
+        let schema = serde_json::json!({
+            "type": "object",
+            "required": ["fields"],
+            "properties": {
+                "fields": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "additionalProperties": {
+                        "oneOf": [
+                            { "type": "integer" },
+                            { "type": "number" },
+                            { "type": "boolean" },
+                            { "type": "string" },
+                            { "type": "array", "items": { "type": "integer", "minimum": 0, "maximum": 255 } },
+                            { "type": "null" }
+                        ]
+                    }
+                }
+            }
+        });
+
+        let validator = compile_schema(schema);
+
+        let valid = serde_json::json!({
+            "fields": {
+                "title": "Hello",
+                "score": 4.2,
+                "bytes": [1, 2, 3],
+                "ok": true,
+                "optional": null
+            }
+        });
+        assert!(validator.is_valid(&valid));
+
+        let invalid = serde_json::json!({
+            "fields": []
+        });
+        assert!(!validator.is_valid(&invalid));
+    }
+
+    #[test]
+    fn search_request_schema() {
+        let schema = serde_json::json!({
+            "type": "object",
+            "required": ["query"],
+            "properties": {
+                "query": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": { "type": "number" }
+                },
+                "k": { "type": "integer", "minimum": 1 },
+                "metric": { "type": "string", "enum": ["Cosine", "L2"] }
+            }
+        });
+
+        let validator = compile_schema(schema);
+
+        let valid = serde_json::json!({
+            "query": [1.0, 2.0, 3.0, 4.0],
+            "k": 5,
+            "metric": "Cosine"
+        });
+        assert!(validator.is_valid(&valid));
+
+        let invalid = serde_json::json!({
+            "k": 5
+        });
+        assert!(!validator.is_valid(&invalid));
+    }
+
+    #[test]
+    fn search_text_request_schema() {
+        let schema = serde_json::json!({
+            "type": "object",
+            "required": ["query_text"],
+            "properties": {
+                "query_text": { "type": "string", "minLength": 1 },
+                "k": { "type": "integer", "minimum": 1 },
+                "metric": { "type": "string", "enum": ["Cosine", "L2"] }
+            }
+        });
+
+        let validator = compile_schema(schema);
+
+        let valid = serde_json::json!({
+            "query_text": "hello world",
+            "k": 5,
+            "metric": "L2"
+        });
+        assert!(validator.is_valid(&valid));
+
+        let invalid = serde_json::json!({
+            "query_text": ""
+        });
+        assert!(!validator.is_valid(&invalid));
+    }
+}
+
 #[cfg(feature = "http")]
 struct LocalHashEmbedder;
 

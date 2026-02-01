@@ -8,9 +8,11 @@
 - Added optional HTTP server (`embeddb-server`) behind the `http` feature flag for CRUD + search.
 - Added HTTP endpoints for `flush` and `compact`.
 - Added HTTP API reference doc and examples.
+- Added JSON Schema contract tests for HTTP request payloads.
 
 ## Verification
 - `make check`
+- `cargo test -p embeddb-server --features contract-tests`
 
 ## PR instructions
 - No PRs requested; work is on `main`.
