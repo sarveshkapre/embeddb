@@ -196,6 +196,48 @@ mod contract_tests {
         });
         assert!(!validator.is_valid(&invalid));
     }
+
+    #[test]
+    fn health_response_schema() {
+        let schema = serde_json::json!({
+            "type": "object",
+            "required": ["status"],
+            "properties": {
+                "status": { "type": "string" }
+            }
+        });
+        let validator = compile_schema(schema);
+        let ok = serde_json::json!({ "status": "ok" });
+        assert!(validator.is_valid(&ok));
+    }
+
+    #[test]
+    fn create_table_response_schema() {
+        let schema = serde_json::json!({
+            "type": "object",
+            "required": ["ok"],
+            "properties": {
+                "ok": { "type": "boolean" }
+            }
+        });
+        let validator = compile_schema(schema);
+        let ok = serde_json::json!({ "ok": true });
+        assert!(validator.is_valid(&ok));
+    }
+
+    #[test]
+    fn error_response_schema() {
+        let schema = serde_json::json!({
+            "type": "object",
+            "required": ["error"],
+            "properties": {
+                "error": { "type": "string", "minLength": 1 }
+            }
+        });
+        let validator = compile_schema(schema);
+        let ok = serde_json::json!({ "error": "bad request" });
+        assert!(validator.is_valid(&ok));
+    }
 }
 
 #[cfg(feature = "http")]

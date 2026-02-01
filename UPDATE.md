@@ -9,6 +9,7 @@
 - Added HTTP endpoints for `flush` and `compact`.
 - Added HTTP API reference doc and examples.
 - Added JSON Schema contract tests for HTTP request payloads.
+- Added response and error JSON schema contract coverage.
 
 ## Verification
 - `make check`

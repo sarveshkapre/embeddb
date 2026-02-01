@@ -9,6 +9,7 @@
 - Added HTTP endpoints for `flush` and `compact`.
 - Added HTTP API reference with example payloads.
 - Added JSON Schema contract tests for HTTP request payloads.
+- Added response and error JSON schema contract coverage.
 - Scaffolded workspace, docs, and CLI/server placeholders.
 - Added WAL with replay + truncation handling and basic crash-recovery tests.
 - Implemented in-memory tables with typed schemas and row CRUD.

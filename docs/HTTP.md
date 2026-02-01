@@ -12,6 +12,7 @@ This repo includes JSON Schema-based contract tests for request payloads:
 ```bash
 cargo test -p embeddb-server --features contract-tests
 ```
+The contract tests also validate core response and error shapes.
 
 ## Common responses
 - Success: `200` or `201` with JSON payloads.
