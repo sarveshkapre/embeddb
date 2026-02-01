@@ -317,6 +317,83 @@ mod contract_tests {
         });
         assert!(!validator.is_valid(&invalid));
     }
+
+    #[test]
+    fn table_stats_response_schema() {
+        let schema = serde_json::json!({
+            "type": "object",
+            "required": [
+                "name",
+                "rows_mem",
+                "tombstones_mem",
+                "embeddings_total",
+                "embeddings_pending",
+                "embeddings_ready",
+                "embeddings_failed",
+                "sst_files",
+                "next_row_id"
+            ],
+            "properties": {
+                "name": { "type": "string", "minLength": 1 },
+                "rows_mem": { "type": "integer", "minimum": 0 },
+                "tombstones_mem": { "type": "integer", "minimum": 0 },
+                "embeddings_total": { "type": "integer", "minimum": 0 },
+                "embeddings_pending": { "type": "integer", "minimum": 0 },
+                "embeddings_ready": { "type": "integer", "minimum": 0 },
+                "embeddings_failed": { "type": "integer", "minimum": 0 },
+                "sst_files": { "type": "integer", "minimum": 0 },
+                "next_row_id": { "type": "integer", "minimum": 1 }
+            }
+        });
+        let validator = compile_schema(schema);
+        let ok = serde_json::json!({
+            "name": "notes",
+            "rows_mem": 1,
+            "tombstones_mem": 0,
+            "embeddings_total": 1,
+            "embeddings_pending": 1,
+            "embeddings_ready": 0,
+            "embeddings_failed": 0,
+            "sst_files": 0,
+            "next_row_id": 2
+        });
+        assert!(validator.is_valid(&ok));
+    }
+
+    #[test]
+    fn search_response_schema() {
+        let schema = serde_json::json!({
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": ["row_id", "distance"],
+                "properties": {
+                    "row_id": { "type": "integer", "minimum": 1 },
+                    "distance": { "type": "number" }
+                }
+            }
+        });
+        let validator = compile_schema(schema);
+        let ok = serde_json::json!([
+            { "row_id": 1, "distance": 0.1 },
+            { "row_id": 2, "distance": 0.2 }
+        ]);
+        assert!(validator.is_valid(&ok));
+    }
+
+    #[test]
+    fn process_jobs_response_schema() {
+        let schema = serde_json::json!({
+            "type": "object",
+            "required": ["processed"],
+            "properties": {
+                "processed": { "type": "integer", "minimum": 0 }
+            }
+        });
+        let validator = compile_schema(schema);
+        let ok = serde_json::json!({ "processed": 2 });
+        assert!(validator.is_valid(&ok));
+    }
 }
 
 #[cfg(feature = "http")]
