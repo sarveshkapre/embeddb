@@ -16,10 +16,11 @@ EmbedDB is a single-node embedded database (Rust) with durable WAL-backed writes
 - Made kNN sort robust (`total_cmp`) to avoid panics on non-finite distances.
 - Added table stats API and CLI (`table_stats`, `table-stats`) for quick table health insight.
 - Added optional HTTP server (`embeddb-server`) behind the `http` feature flag for CRUD + search.
+- Added HTTP endpoints for `flush` and `compact`.
 
 ## Next (tight scope)
 - More crash-recovery/compaction correctness tests.
-- Add flush/compact endpoints to the HTTP server.
+- Add OpenAPI-style route docs and example payloads.
 
 ## Top risks / unknowns
 - Compaction correctness and read visibility across memtable/SST levels.

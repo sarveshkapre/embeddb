@@ -41,6 +41,13 @@ cargo run -p embeddb-server --features http
 EMBEDDB_ADDR=127.0.0.1:9090 EMBEDDB_DATA_DIR=./data cargo run -p embeddb-server --features http
 ```
 
+## HTTP examples
+```bash
+curl -s http://127.0.0.1:8080/health
+curl -s -X POST http://127.0.0.1:8080/tables/notes/flush
+curl -s -X POST http://127.0.0.1:8080/tables/notes/compact
+```
+
 ## Repository layout
 - `crates/embeddb`: core library
 - `crates/embeddb-cli`: CLI (scaffold)

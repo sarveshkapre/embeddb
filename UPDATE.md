@@ -6,6 +6,7 @@
 - Made kNN sort robust against non-finite distances.
 - Added table stats API/CLI for quick table health insight.
 - Added optional HTTP server (`embeddb-server`) behind the `http` feature flag for CRUD + search.
+- Added HTTP endpoints for `flush` and `compact`.
 
 ## Verification
 - `make check`

@@ -87,6 +87,8 @@ fn run_http() -> Result<()> {
         .route("/tables/:table/search", post(search))
         .route("/tables/:table/search-text", post(search_text))
         .route("/tables/:table/jobs/process", post(process_jobs))
+        .route("/tables/:table/flush", post(flush_table))
+        .route("/tables/:table/compact", post(compact_table))
         .layer(TraceLayer::new_for_http())
         .with_state(state);
 
@@ -312,4 +314,28 @@ async fn process_jobs(
         .process_pending_jobs(&table, &embedder)
         .map_err(|err| ApiError::bad_request(err.to_string()))?;
     Ok(Json(serde_json::json!({ "processed": processed })))
+}
+
+#[cfg(feature = "http")]
+async fn flush_table(
+    State(state): State<Arc<AppState>>,
+    Path(table): Path<String>,
+) -> Result<impl IntoResponse, ApiError> {
+    state
+        .db
+        .flush_table(&table)
+        .map_err(|err| ApiError::bad_request(err.to_string()))?;
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+#[cfg(feature = "http")]
+async fn compact_table(
+    State(state): State<Arc<AppState>>,
+    Path(table): Path<String>,
+) -> Result<impl IntoResponse, ApiError> {
+    state
+        .db
+        .compact_table(&table)
+        .map_err(|err| ApiError::bad_request(err.to_string()))?;
+    Ok(Json(serde_json::json!({ "ok": true })))
 }
