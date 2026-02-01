@@ -12,6 +12,7 @@
 - Added response and error JSON schema contract coverage.
 - Added list/describe response schema contract tests.
 - Added stats/search/process response schema contract tests.
+- Added row CRUD response schema contract tests.
 
 ## Verification
 - `make check`

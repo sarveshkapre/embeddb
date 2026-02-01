@@ -394,6 +394,70 @@ mod contract_tests {
         let ok = serde_json::json!({ "processed": 2 });
         assert!(validator.is_valid(&ok));
     }
+
+    #[test]
+    fn insert_row_response_schema() {
+        let schema = serde_json::json!({
+            "type": "object",
+            "required": ["row_id"],
+            "properties": {
+                "row_id": { "type": "integer", "minimum": 1 }
+            }
+        });
+        let validator = compile_schema(schema);
+        let ok = serde_json::json!({ "row_id": 1 });
+        assert!(validator.is_valid(&ok));
+    }
+
+    #[test]
+    fn delete_row_response_schema() {
+        let schema = serde_json::json!({
+            "type": "object",
+            "required": ["ok"],
+            "properties": {
+                "ok": { "type": "boolean" }
+            }
+        });
+        let validator = compile_schema(schema);
+        let ok = serde_json::json!({ "ok": true });
+        assert!(validator.is_valid(&ok));
+    }
+
+    #[test]
+    fn get_row_response_schema() {
+        let schema = serde_json::json!({
+            "type": "object",
+            "required": ["id", "fields"],
+            "properties": {
+                "id": { "type": "integer", "minimum": 1 },
+                "fields": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "oneOf": [
+                            { "type": "integer" },
+                            { "type": "number" },
+                            { "type": "boolean" },
+                            { "type": "string" },
+                            { "type": "array", "items": { "type": "integer", "minimum": 0, "maximum": 255 } },
+                            { "type": "null" }
+                        ]
+                    }
+                }
+            }
+        });
+        let validator = compile_schema(schema);
+        let ok = serde_json::json!({
+            "id": 1,
+            "fields": {
+                "title": "Hello",
+                "score": 4.2,
+                "bytes": [1, 2, 3],
+                "ok": true,
+                "optional": null
+            }
+        });
+        assert!(validator.is_valid(&ok));
+    }
 }
 
 #[cfg(feature = "http")]
