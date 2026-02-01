@@ -7,6 +7,7 @@
 - Added table stats API and CLI command (`table_stats`, `table-stats`).
 - Added optional HTTP server (`embeddb-server`) behind the `http` feature flag for CRUD + search.
 - Added HTTP endpoints for `flush` and `compact`.
+- Added HTTP API reference with example payloads.
 - Scaffolded workspace, docs, and CLI/server placeholders.
 - Added WAL with replay + truncation handling and basic crash-recovery tests.
 - Implemented in-memory tables with typed schemas and row CRUD.

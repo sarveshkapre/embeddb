@@ -7,6 +7,7 @@
 - Added table stats API/CLI for quick table health insight.
 - Added optional HTTP server (`embeddb-server`) behind the `http` feature flag for CRUD + search.
 - Added HTTP endpoints for `flush` and `compact`.
+- Added HTTP API reference doc and examples.
 
 ## Verification
 - `make check`

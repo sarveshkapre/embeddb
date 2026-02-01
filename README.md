@@ -48,6 +48,8 @@ curl -s -X POST http://127.0.0.1:8080/tables/notes/flush
 curl -s -X POST http://127.0.0.1:8080/tables/notes/compact
 ```
 
+Full HTTP reference: `docs/HTTP.md`.
+
 ## Repository layout
 - `crates/embeddb`: core library
 - `crates/embeddb-cli`: CLI (scaffold)
