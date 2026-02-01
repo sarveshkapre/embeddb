@@ -238,6 +238,85 @@ mod contract_tests {
         let ok = serde_json::json!({ "error": "bad request" });
         assert!(validator.is_valid(&ok));
     }
+
+    #[test]
+    fn list_tables_response_schema() {
+        let schema = serde_json::json!({
+            "type": "array",
+            "items": { "type": "string" }
+        });
+        let validator = compile_schema(schema);
+        let ok = serde_json::json!(["notes", "users"]);
+        assert!(validator.is_valid(&ok));
+        let invalid = serde_json::json!([1, 2, 3]);
+        assert!(!validator.is_valid(&invalid));
+    }
+
+    #[test]
+    fn describe_table_response_schema() {
+        let schema = serde_json::json!({
+            "type": "object",
+            "required": ["name", "schema"],
+            "properties": {
+                "name": { "type": "string", "minLength": 1 },
+                "schema": {
+                    "type": "object",
+                    "required": ["columns"],
+                    "properties": {
+                        "columns": {
+                            "type": "array",
+                            "minItems": 1,
+                            "items": {
+                                "type": "object",
+                                "required": ["name", "data_type", "nullable"],
+                                "properties": {
+                                    "name": { "type": "string", "minLength": 1 },
+                                    "data_type": {
+                                        "type": "string",
+                                        "enum": ["Int", "Float", "Bool", "String", "Bytes"]
+                                    },
+                                    "nullable": { "type": "boolean" }
+                                }
+                            }
+                        }
+                    }
+                },
+                "embedding_spec": {
+                    "anyOf": [
+                        { "type": "null" },
+                        {
+                            "type": "object",
+                            "required": ["source_fields"],
+                            "properties": {
+                                "source_fields": {
+                                    "type": "array",
+                                    "items": { "type": "string", "minLength": 1 }
+                                }
+                            }
+                        }
+                    ]
+                }
+            }
+        });
+        let validator = compile_schema(schema);
+        let ok = serde_json::json!({
+            "name": "notes",
+            "schema": {
+                "columns": [
+                    { "name": "title", "data_type": "String", "nullable": false }
+                ]
+            },
+            "embedding_spec": {
+                "source_fields": ["title"]
+            }
+        });
+        assert!(validator.is_valid(&ok));
+        let invalid = serde_json::json!({
+            "name": "notes",
+            "schema": { "columns": [] }
+        });
+        assert!(!validator.is_valid(&invalid));
+    }
 }
 
 #[cfg(feature = "http")]
