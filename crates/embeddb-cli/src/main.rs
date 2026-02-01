@@ -62,6 +62,15 @@ enum Commands {
         #[arg(long, value_enum, default_value_t = MetricArg::Cosine)]
         metric: MetricArg,
     },
+    SearchText {
+        table: String,
+        #[arg(long)]
+        query_text: String,
+        #[arg(long, default_value_t = 5)]
+        k: usize,
+        #[arg(long, value_enum, default_value_t = MetricArg::Cosine)]
+        metric: MetricArg,
+    },
     Flush {
         table: String,
     },
@@ -170,6 +179,17 @@ fn main() -> Result<()> {
             metric,
         } => {
             let query_vec = parse_vector(&query)?;
+            let hits = db.search_knn(&table, &query_vec, k, metric.into())?;
+            println!("{}", serde_json::to_string_pretty(&hits)?);
+        }
+        Commands::SearchText {
+            table,
+            query_text,
+            k,
+            metric,
+        } => {
+            let embedder = LocalHashEmbedder;
+            let query_vec = embedder.embed(&query_text)?;
             let hits = db.search_knn(&table, &query_vec, k, metric.into())?;
             println!("{}", serde_json::to_string_pretty(&hits)?);
         }

@@ -501,7 +501,7 @@ impl EmbedDb {
             });
         }
 
-        results.sort_by(|a, b| a.distance.partial_cmp(&b.distance).unwrap());
+        results.sort_by(|a, b| a.distance.total_cmp(&b.distance));
         let hits = results
             .into_iter()
             .take(k)

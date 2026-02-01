@@ -2,10 +2,11 @@
 
 ## Summary
 - Added `embeddb` core APIs to list/describe tables, plus corresponding CLI commands.
+- Added `embeddb-cli search-text` for query text embedding and kNN search.
+- Made kNN sort robust against non-finite distances.
 
 ## Verification
 - `make check`
 
 ## PR instructions
-- Branch: `feat/table-introspection`
-- PR: https://github.com/sarveshkapre/embeddb/pull/1
+- No PRs requested; work is on `main`.

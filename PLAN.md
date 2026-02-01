@@ -12,9 +12,10 @@ EmbedDB is a single-node embedded database (Rust) with durable WAL-backed writes
 
 ## Shipped (this run)
 - Added table introspection APIs (`list_tables`, `describe_table`) and CLI commands (`list-tables`, `describe-table`).
+- Added `embeddb-cli search-text` to embed query text and run kNN search without manual vectors.
+- Made kNN sort robust (`total_cmp`) to avoid panics on non-finite distances.
 
 ## Next (tight scope)
-- `embeddb-cli search-text --query-text ...` (embed query via local embedder) to avoid manual vector input.
 - Add a small `embeddb-server` HTTP MVP (behind a feature flag) for CRUD + search.
 - More crash-recovery/compaction correctness tests.
 
