@@ -5,6 +5,7 @@
 - Added `embeddb-cli search-text` to embed query text and run kNN search without manual vectors.
 - Made kNN sort robust against non-finite distances.
 - Added table stats API and CLI command (`table_stats`, `table-stats`).
+- Added optional HTTP server (`embeddb-server`) behind the `http` feature flag for CRUD + search.
 - Scaffolded workspace, docs, and CLI/server placeholders.
 - Added WAL with replay + truncation handling and basic crash-recovery tests.
 - Implemented in-memory tables with typed schemas and row CRUD.

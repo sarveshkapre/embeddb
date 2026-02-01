@@ -5,6 +5,7 @@
 - Added `embeddb-cli search-text` for query text embedding and kNN search.
 - Made kNN sort robust against non-finite distances.
 - Added table stats API/CLI for quick table health insight.
+- Added optional HTTP server (`embeddb-server`) behind the `http` feature flag for CRUD + search.
 
 ## Verification
 - `make check`
