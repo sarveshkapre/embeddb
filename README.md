@@ -1,0 +1,30 @@
+# EmbedDB
+
+Rust single-node embedded DB with WAL + LSM (memtable → SST + compaction), typed tables, and automatic per-row embeddings. Primary writes are committed durably first, then embedding jobs run asynchronously with idempotent status tracking.
+
+## Status
+- MVP in progress. WAL + in-memory tables + embedding jobs + brute-force search + SST flush/L0 compaction implemented.
+
+## Key goals
+- Durable primary writes before embedding jobs
+- Per-row embedding jobs with status (`pending`, `ready`, `failed`) and content hash
+- Vector kNN search (cosine/L2) — brute-force MVP → HNSW v1
+- Pluggable local-first embedder, optional remote embedder feature flag
+- Observability + crash-recovery tests
+- Embedded library with optional server + CLI
+
+## Quickstart (scaffold)
+```bash
+make setup
+make check
+cargo run -p embeddb-cli -- --help
+```
+
+## Repository layout
+- `crates/embeddb`: core library
+- `crates/embeddb-cli`: CLI (scaffold)
+- `crates/embeddb-server`: optional server (scaffold)
+- `docs/`: project docs and plans
+
+## License
+MIT.
