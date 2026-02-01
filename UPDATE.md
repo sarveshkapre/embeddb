@@ -13,6 +13,7 @@
 - Added list/describe response schema contract tests.
 - Added stats/search/process response schema contract tests.
 - Added row CRUD response schema contract tests.
+- Added flush/compact response schema contract tests.
 
 ## Verification
 - `make check`

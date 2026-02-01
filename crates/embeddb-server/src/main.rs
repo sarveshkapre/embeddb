@@ -458,6 +458,20 @@ mod contract_tests {
         });
         assert!(validator.is_valid(&ok));
     }
+
+    #[test]
+    fn flush_compact_response_schema() {
+        let schema = serde_json::json!({
+            "type": "object",
+            "required": ["ok"],
+            "properties": {
+                "ok": { "type": "boolean" }
+            }
+        });
+        let validator = compile_schema(schema);
+        let ok = serde_json::json!({ "ok": true });
+        assert!(validator.is_valid(&ok));
+    }
 }
 
 #[cfg(feature = "http")]

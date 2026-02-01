@@ -23,10 +23,11 @@ EmbedDB is a single-node embedded database (Rust) with durable WAL-backed writes
 - Added list/describe response schema contract tests.
 - Added stats/search/process response schema contract tests.
 - Added row CRUD response schema contract tests.
+- Added flush/compact response schema contract tests.
 
 ## Next (tight scope)
 - More crash-recovery/compaction correctness tests.
-- Add contract tests for flush/compact responses.
+- Add end-to-end HTTP smoke test (feature-gated).
 
 ## Top risks / unknowns
 - Compaction correctness and read visibility across memtable/SST levels.

@@ -13,6 +13,7 @@
 - Added list/describe response schema contract tests.
 - Added stats/search/process response schema contract tests.
 - Added row CRUD response schema contract tests.
+- Added flush/compact response schema contract tests.
 - Scaffolded workspace, docs, and CLI/server placeholders.
 - Added WAL with replay + truncation handling and basic crash-recovery tests.
 - Implemented in-memory tables with typed schemas and row CRUD.
