@@ -4,6 +4,7 @@
 - Added table introspection APIs (`list_tables`, `describe_table`) and CLI commands (`list-tables`, `describe-table`).
 - Added `embeddb-cli search-text` to embed query text and run kNN search without manual vectors.
 - Made kNN sort robust against non-finite distances.
+- Added table stats API and CLI command (`table_stats`, `table-stats`).
 - Scaffolded workspace, docs, and CLI/server placeholders.
 - Added WAL with replay + truncation handling and basic crash-recovery tests.
 - Implemented in-memory tables with typed schemas and row CRUD.

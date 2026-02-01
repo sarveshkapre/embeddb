@@ -27,6 +27,9 @@ enum Commands {
     DescribeTable {
         table: String,
     },
+    TableStats {
+        table: String,
+    },
     CreateTable {
         table: String,
         #[arg(long)]
@@ -133,6 +136,10 @@ fn main() -> Result<()> {
         Commands::DescribeTable { table } => {
             let desc = db.describe_table(&table)?;
             println!("{}", serde_json::to_string_pretty(&desc)?);
+        }
+        Commands::TableStats { table } => {
+            let stats = db.table_stats(&table)?;
+            println!("{}", serde_json::to_string_pretty(&stats)?);
         }
         Commands::CreateTable {
             table,

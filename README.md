@@ -25,6 +25,9 @@ cargo run -p embeddb-cli -- --help
 # List tables
 cargo run -p embeddb-cli -- list-tables
 
+# Table stats
+cargo run -p embeddb-cli -- table-stats notes
+
 # Text search (embeds the query via the local hash embedder)
 cargo run -p embeddb-cli -- search-text notes --query-text "hello world" --k 5
 ```

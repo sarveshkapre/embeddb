@@ -66,6 +66,19 @@ pub struct TableDescriptor {
     pub embedding_spec: Option<EmbeddingSpec>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TableStats {
+    pub name: String,
+    pub rows_mem: usize,
+    pub tombstones_mem: usize,
+    pub embeddings_total: usize,
+    pub embeddings_pending: usize,
+    pub embeddings_ready: usize,
+    pub embeddings_failed: usize,
+    pub sst_files: usize,
+    pub next_row_id: u64,
+}
+
 #[derive(Debug)]
 struct TableState {
     schema: TableSchema,
@@ -142,6 +155,38 @@ impl EmbedDb {
             name: table.to_string(),
             schema: table_state.schema.clone(),
             embedding_spec: table_state.embedding_spec.clone(),
+        })
+    }
+
+    pub fn table_stats(&self, table: &str) -> Result<TableStats> {
+        let inner = self.inner.lock().map_err(|_| anyhow!("lock poisoned"))?;
+        let table_state = inner
+            .state
+            .tables
+            .get(table)
+            .ok_or_else(|| anyhow!("table not found"))?;
+
+        let mut pending = 0usize;
+        let mut ready = 0usize;
+        let mut failed = 0usize;
+        for meta in table_state.embedding_meta.values() {
+            match meta.status {
+                EmbeddingStatus::Pending => pending += 1,
+                EmbeddingStatus::Ready => ready += 1,
+                EmbeddingStatus::Failed => failed += 1,
+            }
+        }
+
+        Ok(TableStats {
+            name: table.to_string(),
+            rows_mem: table_state.rows.len(),
+            tombstones_mem: table_state.tombstones.len(),
+            embeddings_total: table_state.embedding_meta.len(),
+            embeddings_pending: pending,
+            embeddings_ready: ready,
+            embeddings_failed: failed,
+            sst_files: table_state.sst_files.len(),
+            next_row_id: table_state.next_row_id,
         })
     }
 
@@ -785,5 +830,34 @@ mod tests {
         let desc = db.describe_table("notes").unwrap();
         assert_eq!(desc.name, "notes");
         assert!(desc.embedding_spec.is_some());
+    }
+
+    #[test]
+    fn table_stats_counts_embeddings() {
+        let dir = tempdir().unwrap();
+        let db = EmbedDb::open(Config::new(dir.path().to_path_buf())).unwrap();
+
+        let schema = TableSchema::new(vec![
+            Column::new("title", DataType::String, false),
+            Column::new("body", DataType::String, false),
+        ]);
+        let embed_spec = EmbeddingSpec::new(vec!["title", "body"]);
+        db.create_table("notes", schema, Some(embed_spec)).unwrap();
+
+        let mut fields = BTreeMap::new();
+        fields.insert("title".to_string(), Value::String("Hello".to_string()));
+        fields.insert("body".to_string(), Value::String("World".to_string()));
+        db.insert_row("notes", fields).unwrap();
+
+        let stats = db.table_stats("notes").unwrap();
+        assert_eq!(stats.embeddings_total, 1);
+        assert_eq!(stats.embeddings_pending, 1);
+
+        let processed = db.process_pending_jobs("notes", &DummyEmbedder).unwrap();
+        assert_eq!(processed, 1);
+
+        let stats = db.table_stats("notes").unwrap();
+        assert_eq!(stats.embeddings_ready, 1);
+        assert_eq!(stats.embeddings_pending, 0);
     }
 }
