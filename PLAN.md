@@ -1,0 +1,30 @@
+# EmbedDB
+
+EmbedDB is a single-node embedded database (Rust) with durable WAL-backed writes, LSM storage (memtable → SST + compaction), typed tables, and automatic per-row embeddings with local-first vector search.
+
+## Features (current)
+- Durable primary writes (WAL first).
+- Typed tables (schema validation) with row CRUD.
+- Embedding jobs with idempotent status tracking (`pending`/`ready`/`failed`) and content hashing.
+- Brute-force kNN search (cosine/L2) over stored vectors.
+- SST flush + basic L0 compaction (tombstones supported).
+- CLI for core operations (create/insert/get/delete/jobs/process/search/flush/compact + list/describe tables).
+
+## Shipped (this run)
+- Added table introspection APIs (`list_tables`, `describe_table`) and CLI commands (`list-tables`, `describe-table`).
+
+## Next (tight scope)
+- `embeddb-cli search-text --query-text ...` (embed query via local embedder) to avoid manual vector input.
+- Add a small `embeddb-server` HTTP MVP (behind a feature flag) for CRUD + search.
+- More crash-recovery/compaction correctness tests.
+
+## Top risks / unknowns
+- Compaction correctness and read visibility across memtable/SST levels.
+- WAL durability/fsync strategy tradeoffs (performance vs correctness).
+- Embedding job idempotency and failure handling across crashes.
+
+## Commands
+See `docs/PROJECT.md` for the full command list; common ones:
+- Setup: `make setup`
+- Quality gate: `make check`
+- CLI help: `cargo run -p embeddb-cli -- --help`

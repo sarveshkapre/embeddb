@@ -1,10 +1,3 @@
 # CHANGELOG
 
-## Unreleased
-- Scaffolded workspace, docs, and CLI/server placeholders.
-- Added WAL with replay + truncation handling and basic crash-recovery tests.
-- Implemented in-memory tables with typed schemas and row CRUD.
-- Added embedding job queue with idempotent status updates and local embedder API.
-- Added brute-force kNN search (cosine/L2) over stored vectors.
-- Added SST flush + L0 compaction with tombstone support.
-- Expanded CLI with table CRUD, job processing, search, flush, and compaction commands.
+The canonical changelog lives at the repo root: `CHANGELOG.md`.

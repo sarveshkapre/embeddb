@@ -89,15 +89,15 @@ pub enum Value {
 
 impl Value {
     pub fn matches(&self, data_type: &DataType) -> bool {
-        match (self, data_type) {
-            (Value::Int(_), DataType::Int) => true,
-            (Value::Float(_), DataType::Float) => true,
-            (Value::Bool(_), DataType::Bool) => true,
-            (Value::String(_), DataType::String) => true,
-            (Value::Bytes(_), DataType::Bytes) => true,
-            (Value::Null, _) => true,
-            _ => false,
-        }
+        matches!(
+            (self, data_type),
+            (Value::Int(_), DataType::Int)
+                | (Value::Float(_), DataType::Float)
+                | (Value::Bool(_), DataType::Bool)
+                | (Value::String(_), DataType::String)
+                | (Value::Bytes(_), DataType::Bytes)
+                | (Value::Null, _)
+        )
     }
 
     pub fn as_string(&self) -> Result<String> {

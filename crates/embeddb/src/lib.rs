@@ -59,6 +59,13 @@ pub struct SearchHit {
     pub distance: f32,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TableDescriptor {
+    pub name: String,
+    pub schema: TableSchema,
+    pub embedding_spec: Option<EmbeddingSpec>,
+}
+
 #[derive(Debug)]
 struct TableState {
     schema: TableSchema,
@@ -114,6 +121,27 @@ impl EmbedDb {
         Ok(Self {
             _config: config,
             inner: Mutex::new(Inner { wal, state }),
+        })
+    }
+
+    pub fn list_tables(&self) -> Result<Vec<String>> {
+        let inner = self.inner.lock().map_err(|_| anyhow!("lock poisoned"))?;
+        let mut out: Vec<String> = inner.state.tables.keys().cloned().collect();
+        out.sort();
+        Ok(out)
+    }
+
+    pub fn describe_table(&self, table: &str) -> Result<TableDescriptor> {
+        let inner = self.inner.lock().map_err(|_| anyhow!("lock poisoned"))?;
+        let table_state = inner
+            .state
+            .tables
+            .get(table)
+            .ok_or_else(|| anyhow!("table not found"))?;
+        Ok(TableDescriptor {
+            name: table.to_string(),
+            schema: table_state.schema.clone(),
+            embedding_spec: table_state.embedding_spec.clone(),
         })
     }
 
@@ -731,5 +759,31 @@ mod tests {
 
         let row = db.get_row("notes", row_id).unwrap();
         assert!(row.is_none());
+    }
+
+    #[test]
+    fn list_and_describe_tables() {
+        let dir = tempdir().unwrap();
+        let db = EmbedDb::open(Config::new(dir.path().to_path_buf())).unwrap();
+
+        db.create_table(
+            "notes",
+            TableSchema::new(vec![Column::new("title", DataType::String, false)]),
+            Some(EmbeddingSpec::new(vec!["title"])),
+        )
+        .unwrap();
+        db.create_table(
+            "users",
+            TableSchema::new(vec![Column::new("name", DataType::String, false)]),
+            None,
+        )
+        .unwrap();
+
+        let tables = db.list_tables().unwrap();
+        assert_eq!(tables, vec!["notes".to_string(), "users".to_string()]);
+
+        let desc = db.describe_table("notes").unwrap();
+        assert_eq!(desc.name, "notes");
+        assert!(desc.embedding_spec.is_some());
     }
 }
