@@ -7,6 +7,10 @@
 cargo run -p embeddb-server --features http
 ```
 
+## Web Console
+The HTTP server also serves a built-in UI at `http://127.0.0.1:8080`. Use it to create tables,
+insert rows, process embedding jobs, and run text search.
+
 ## Contract tests
 This repo includes JSON Schema-based contract tests for request payloads:
 ```bash

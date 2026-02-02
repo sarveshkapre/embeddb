@@ -1,6 +1,8 @@
 # EmbedDB
 
-Rust single-node embedded DB with WAL + LSM (memtable → SST + compaction), typed tables, and automatic per-row embeddings. Primary writes are committed durably first, then embedding jobs run asynchronously with idempotent status tracking.
+Rust embedded database with WAL + LSM and automatic per-row embeddings for local-first vector search.
+
+Primary writes commit durably first; embedding jobs then run asynchronously with idempotent status tracking. Typed tables, SST flush, and compaction are built in.
 
 ## Status
 - MVP in progress. WAL + in-memory tables + embedding jobs + brute-force search + SST flush/L0 compaction implemented.
@@ -40,6 +42,10 @@ cargo run -p embeddb-server --features http
 # Override address/data dir
 EMBEDDB_ADDR=127.0.0.1:9090 EMBEDDB_DATA_DIR=./data cargo run -p embeddb-server --features http
 ```
+
+## Web Console
+When the HTTP server is running, open `http://127.0.0.1:8080` to use the built-in console for
+creating tables, inserting rows, processing embeddings, and running text search.
 
 ## HTTP examples
 ```bash

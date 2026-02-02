@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>EmbedDB Console</title>
+    <link rel="stylesheet" href="/assets/styles.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="topbar">
+        <div class="brand">
+          <div class="brand-title">EmbedDB Console</div>
+          <div class="brand-subtitle">Local-first vector search database</div>
+        </div>
+        <div class="status-pill" id="health-status">Checking…</div>
+      </header>
+
+      <main class="main">
+        <section class="hero">
+          <div class="hero-copy">
+            <h1>Build local-first search in minutes.</h1>
+            <p>
+              Create tables, ingest rows, and run semantic search with automatic per-row
+              embeddings. The demo uses a local hash embedder—no network calls.
+            </p>
+            <div class="hero-actions">
+              <button class="btn btn-primary" id="demo-seed">Create demo dataset</button>
+              <button class="btn btn-ghost" id="demo-search">Try a sample search</button>
+            </div>
+            <div class="hero-note">
+              Tip: Press <span class="kbd">/</span> to focus search, <span class="kbd">i</span> to
+              focus insert.
+            </div>
+          </div>
+          <div class="hero-card">
+            <div class="card-title">Quickstart flow</div>
+            <ol class="card-list">
+              <li>Create the <span class="mono">notes</span> table</li>
+              <li>Seed sample rows</li>
+              <li>Process embedding jobs</li>
+              <li>Run text search</li>
+            </ol>
+            <div class="card-meta" id="demo-status">Ready.</div>
+          </div>
+        </section>
+
+        <section class="grid">
+          <div class="panel">
+            <div class="panel-header">
+              <div>
+                <div class="panel-title">Tables</div>
+                <div class="panel-subtitle">Select a table to view stats and data.</div>
+              </div>
+              <button class="btn btn-small" id="refresh-tables">Refresh</button>
+            </div>
+            <div class="panel-body">
+              <div id="tables-list" class="list"></div>
+              <div id="tables-empty" class="empty">No tables yet.</div>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-header">
+              <div>
+                <div class="panel-title">Table details</div>
+                <div class="panel-subtitle" id="table-selected">Select a table.</div>
+              </div>
+              <div class="panel-actions">
+                <button class="btn btn-small" id="process-jobs">Process embeddings</button>
+                <button class="btn btn-small" id="flush-table">Flush</button>
+                <button class="btn btn-small" id="compact-table">Compact</button>
+              </div>
+            </div>
+            <div class="panel-body">
+              <div class="stats-grid" id="table-stats"></div>
+              <div class="schema" id="table-schema"></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="grid">
+          <div class="panel">
+            <div class="panel-header">
+              <div>
+                <div class="panel-title">Create table</div>
+                <div class="panel-subtitle">Define schema and embedding fields.</div>
+              </div>
+            </div>
+            <div class="panel-body">
+              <div class="form-row">
+                <label for="create-template">Template</label>
+                <select id="create-template">
+                  <option value="notes">Notes (title + body)</option>
+                  <option value="kv">Key/value (key + value)</option>
+                  <option value="custom">Custom JSON</option>
+                </select>
+              </div>
+              <div class="form-row">
+                <label for="create-name">Table name</label>
+                <input id="create-name" type="text" placeholder="notes" />
+              </div>
+              <div class="form-row">
+                <label for="create-embedding">Embedding fields (comma-separated)</label>
+                <input id="create-embedding" type="text" placeholder="title, body" />
+              </div>
+              <div class="form-row">
+                <label for="create-schema">Schema (JSON)</label>
+                <textarea id="create-schema" rows="8"></textarea>
+              </div>
+              <button class="btn btn-primary" id="create-table">Create table</button>
+              <div class="form-hint">
+                Uses EmbedDB schema format with <span class="mono">columns</span> list.
+              </div>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-header">
+              <div>
+                <div class="panel-title">Insert row</div>
+                <div class="panel-subtitle">Adds a row and enqueues an embedding job.</div>
+              </div>
+            </div>
+            <div class="panel-body">
+              <div class="form-row">
+                <label for="insert-json">Fields (JSON)</label>
+                <textarea id="insert-json" rows="8"></textarea>
+              </div>
+              <button class="btn btn-primary" id="insert-row">Insert row</button>
+              <div class="form-hint" id="insert-hint">Select a table to insert rows.</div>
+            </div>
+          </div>
+        </section>
+
+        <section class="grid">
+          <div class="panel">
+            <div class="panel-header">
+              <div>
+                <div class="panel-title">Search</div>
+                <div class="panel-subtitle">Text search with local embeddings.</div>
+              </div>
+              <div class="panel-actions">
+                <label class="switch">
+                  <input type="checkbox" id="auto-process" />
+                  <span class="slider"></span>
+                  <span class="switch-label">Auto-process</span>
+                </label>
+              </div>
+            </div>
+            <div class="panel-body">
+              <div class="form-row">
+                <label for="search-query">Query</label>
+                <input id="search-query" type="text" placeholder="Try: team meeting notes" />
+              </div>
+              <div class="form-row form-inline">
+                <div>
+                  <label for="search-k">Top K</label>
+                  <input id="search-k" type="number" min="1" value="5" />
+                </div>
+                <div>
+                  <label for="search-metric">Metric</label>
+                  <select id="search-metric">
+                    <option value="Cosine">Cosine</option>
+                    <option value="L2">L2</option>
+                  </select>
+                </div>
+                <button class="btn btn-primary" id="search-run">Search</button>
+              </div>
+              <div id="search-results" class="results"></div>
+              <div id="search-empty" class="empty">Run a search to see results.</div>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-header">
+              <div>
+                <div class="panel-title">Row lookup</div>
+                <div class="panel-subtitle">Fetch a row by ID.</div>
+              </div>
+            </div>
+            <div class="panel-body">
+              <div class="form-row form-inline">
+                <input id="lookup-id" type="number" min="1" placeholder="Row ID" />
+                <button class="btn btn-primary" id="lookup-row">Lookup</button>
+              </div>
+              <pre id="lookup-result" class="code-block"></pre>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <div class="toast" id="toast"></div>
+    <script src="/assets/app.js" defer></script>
+  </body>
+</html>

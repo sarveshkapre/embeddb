@@ -1,0 +1,525 @@
+const state = {
+  tables: [],
+  selectedTable: null,
+  schema: null,
+  stats: null,
+  autoProcessTimer: null,
+};
+
+const demo = {
+  name: "notes",
+  schema: {
+    columns: [
+      { name: "title", data_type: "String", nullable: false },
+      { name: "body", data_type: "String", nullable: false },
+      { name: "tag", data_type: "String", nullable: true },
+    ],
+  },
+  embedding_fields: ["title", "body"],
+  rows: [
+    { title: "Team meeting notes", body: "Discussed Q2 goals, hiring plan, and roadmap.", tag: "work" },
+    { title: "Grocery list", body: "Eggs, oat milk, spinach, salmon, berries.", tag: "personal" },
+    { title: "Product pitch", body: "Local-first search for makers building offline apps.", tag: "work" },
+    { title: "Travel ideas", body: "Oslo in July, hike Trolltunga, coffee crawl.", tag: "travel" },
+    { title: "Reading list", body: "Build, The Pragmatic Programmer, Atomic Habits.", tag: "personal" },
+  ],
+};
+
+const templates = {
+  notes: {
+    name: "notes",
+    embedding_fields: "title, body",
+    schema: demo.schema,
+  },
+  kv: {
+    name: "kv_store",
+    embedding_fields: "value",
+    schema: {
+      columns: [
+        { name: "key", data_type: "String", nullable: false },
+        { name: "value", data_type: "String", nullable: false },
+      ],
+    },
+  },
+  custom: {
+    name: "",
+    embedding_fields: "",
+    schema: {
+      columns: [{ name: "title", data_type: "String", nullable: false }],
+    },
+  },
+};
+
+const ui = {
+  health: document.getElementById("health-status"),
+  demoSeed: document.getElementById("demo-seed"),
+  demoSearch: document.getElementById("demo-search"),
+  demoStatus: document.getElementById("demo-status"),
+  refreshTables: document.getElementById("refresh-tables"),
+  tablesList: document.getElementById("tables-list"),
+  tablesEmpty: document.getElementById("tables-empty"),
+  tableSelected: document.getElementById("table-selected"),
+  tableStats: document.getElementById("table-stats"),
+  tableSchema: document.getElementById("table-schema"),
+  processJobs: document.getElementById("process-jobs"),
+  flushTable: document.getElementById("flush-table"),
+  compactTable: document.getElementById("compact-table"),
+  createTemplate: document.getElementById("create-template"),
+  createName: document.getElementById("create-name"),
+  createEmbedding: document.getElementById("create-embedding"),
+  createSchema: document.getElementById("create-schema"),
+  createTable: document.getElementById("create-table"),
+  insertJson: document.getElementById("insert-json"),
+  insertRow: document.getElementById("insert-row"),
+  insertHint: document.getElementById("insert-hint"),
+  searchQuery: document.getElementById("search-query"),
+  searchK: document.getElementById("search-k"),
+  searchMetric: document.getElementById("search-metric"),
+  searchRun: document.getElementById("search-run"),
+  searchResults: document.getElementById("search-results"),
+  searchEmpty: document.getElementById("search-empty"),
+  autoProcess: document.getElementById("auto-process"),
+  lookupId: document.getElementById("lookup-id"),
+  lookupRow: document.getElementById("lookup-row"),
+  lookupResult: document.getElementById("lookup-result"),
+  toast: document.getElementById("toast"),
+};
+
+function showToast(message, tone = "default") {
+  ui.toast.textContent = message;
+  ui.toast.classList.add("show");
+  ui.toast.style.background =
+    tone === "error" ? "#e5484d" : tone === "success" ? "#0f172a" : "#0f172a";
+  window.clearTimeout(showToast._timer);
+  showToast._timer = window.setTimeout(() => ui.toast.classList.remove("show"), 2600);
+}
+
+async function api(path, options = {}) {
+  const headers = options.headers || {};
+  if (options.body && !headers["Content-Type"]) {
+    headers["Content-Type"] = "application/json";
+  }
+  const res = await fetch(path, { ...options, headers });
+  const contentType = res.headers.get("content-type") || "";
+  if (!res.ok) {
+    let message = `${res.status} ${res.statusText}`;
+    if (contentType.includes("application/json")) {
+      const body = await res.json();
+      message = body.error || message;
+    } else {
+      const text = await res.text();
+      if (text) message = text;
+    }
+    throw new Error(message);
+  }
+  if (res.status === 204) return null;
+  if (contentType.includes("application/json")) {
+    return res.json();
+  }
+  return res.text();
+}
+
+async function checkHealth() {
+  try {
+    const health = await api("/health");
+    ui.health.textContent = health.status === "ok" ? "Connected" : "Unknown";
+  } catch (err) {
+    ui.health.textContent = "Disconnected";
+  }
+}
+
+function setBusy(button, busy) {
+  if (!button) return;
+  button.disabled = busy;
+  if (busy) {
+    button.dataset.originalText = button.textContent;
+    button.textContent = "Working…";
+  } else if (button.dataset.originalText) {
+    button.textContent = button.dataset.originalText;
+    delete button.dataset.originalText;
+  }
+}
+
+async function refreshTables() {
+  try {
+    const tables = await api("/tables");
+    state.tables = tables;
+    renderTables();
+    if (tables.length === 0) {
+      ui.tablesEmpty.style.display = "block";
+      state.selectedTable = null;
+      renderSelectedTable();
+    } else if (!state.selectedTable || !tables.includes(state.selectedTable)) {
+      selectTable(tables[0]);
+    }
+  } catch (err) {
+    showToast(err.message, "error");
+  }
+}
+
+function renderTables() {
+  ui.tablesList.innerHTML = "";
+  if (state.tables.length === 0) {
+    ui.tablesEmpty.style.display = "block";
+    return;
+  }
+  ui.tablesEmpty.style.display = "none";
+  state.tables.forEach((table) => {
+    const item = document.createElement("div");
+    item.className = "list-item" + (table === state.selectedTable ? " active" : "");
+    item.textContent = table;
+    item.addEventListener("click", () => selectTable(table));
+    ui.tablesList.appendChild(item);
+  });
+}
+
+async function selectTable(table) {
+  state.selectedTable = table;
+  renderTables();
+  await loadTable(table);
+  renderSelectedTable();
+}
+
+async function loadTable(table) {
+  try {
+    state.schema = await api(`/tables/${table}`);
+    state.stats = await api(`/tables/${table}/stats`);
+  } catch (err) {
+    showToast(err.message, "error");
+  }
+}
+
+function renderSelectedTable() {
+  if (!state.selectedTable) {
+    ui.tableSelected.textContent = "Select a table.";
+    ui.tableStats.innerHTML = "";
+    ui.tableSchema.innerHTML = "";
+    ui.insertHint.textContent = "Select a table to insert rows.";
+    return;
+  }
+  ui.tableSelected.textContent = state.selectedTable;
+  renderStats();
+  renderSchema();
+  ui.insertHint.textContent = `Insert into ${state.selectedTable}.`;
+  if (!ui.insertJson.value) {
+    ui.insertJson.value = JSON.stringify(sampleRowForSchema(), null, 2);
+  }
+}
+
+function renderStats() {
+  if (!state.stats) return;
+  const stats = state.stats;
+  const items = [
+    ["Rows (mem)", stats.rows_mem],
+    ["Embeddings", stats.embeddings_total],
+    ["Pending", stats.embeddings_pending],
+    ["Ready", stats.embeddings_ready],
+    ["Failed", stats.embeddings_failed],
+    ["SST files", stats.sst_files],
+  ];
+  ui.tableStats.innerHTML = "";
+  items.forEach(([label, value]) => {
+    const stat = document.createElement("div");
+    stat.className = "stat";
+    stat.innerHTML = `<div class="stat-label">${label}</div><div class="stat-value">${value}</div>`;
+    ui.tableStats.appendChild(stat);
+  });
+}
+
+function renderSchema() {
+  if (!state.schema) return;
+  const columns = state.schema.schema.columns
+    .map((col) => `<div><span class="mono">${col.name}</span> : ${col.data_type}</div>`)
+    .join("");
+  const embedding = state.schema.embedding_spec?.source_fields?.join(", ") || "none";
+  ui.tableSchema.innerHTML = `
+    <div><strong>Schema</strong></div>
+    ${columns}
+    <div style="margin-top:8px"><strong>Embedding fields</strong></div>
+    <div>${embedding}</div>
+  `;
+}
+
+function sampleRowForSchema() {
+  if (!state.schema) return { title: "Hello", body: "World" };
+  const row = {};
+  state.schema.schema.columns.forEach((col) => {
+    if (col.data_type === "Int") row[col.name] = 1;
+    else if (col.data_type === "Float") row[col.name] = 1.0;
+    else if (col.data_type === "Bool") row[col.name] = true;
+    else if (col.data_type === "Bytes") row[col.name] = [1, 2, 3];
+    else row[col.name] = col.nullable ? null : "text";
+  });
+  return row;
+}
+
+function applyTemplate(key) {
+  const template = templates[key] || templates.custom;
+  ui.createName.value = template.name;
+  ui.createEmbedding.value = template.embedding_fields;
+  ui.createSchema.value = JSON.stringify(template.schema, null, 2);
+}
+
+async function createTable() {
+  const name = ui.createName.value.trim();
+  if (!name) return showToast("Table name is required.", "error");
+  let schema;
+  try {
+    schema = JSON.parse(ui.createSchema.value);
+  } catch (err) {
+    return showToast("Schema JSON is invalid.", "error");
+  }
+  const fields = ui.createEmbedding.value
+    .split(",")
+    .map((f) => f.trim())
+    .filter(Boolean);
+  const payload = { name, schema, embedding_fields: fields.length ? fields : null };
+  try {
+    setBusy(ui.createTable, true);
+    await api("/tables", { method: "POST", body: JSON.stringify(payload) });
+    showToast(`Created table ${name}.`, "success");
+    await refreshTables();
+    await selectTable(name);
+    ui.insertJson.value = JSON.stringify(sampleRowForSchema(), null, 2);
+  } catch (err) {
+    showToast(err.message, "error");
+  } finally {
+    setBusy(ui.createTable, false);
+  }
+}
+
+async function insertRow() {
+  if (!state.selectedTable) return showToast("Select a table first.", "error");
+  let fields;
+  try {
+    fields = JSON.parse(ui.insertJson.value);
+  } catch (err) {
+    return showToast("Row JSON is invalid.", "error");
+  }
+  try {
+    setBusy(ui.insertRow, true);
+    const res = await api(`/tables/${state.selectedTable}/rows`, {
+      method: "POST",
+      body: JSON.stringify({ fields }),
+    });
+    showToast(`Inserted row ${res.row_id}.`, "success");
+    await loadTable(state.selectedTable);
+    renderSelectedTable();
+  } catch (err) {
+    showToast(err.message, "error");
+  } finally {
+    setBusy(ui.insertRow, false);
+  }
+}
+
+async function processJobs() {
+  if (!state.selectedTable) return showToast("Select a table first.", "error");
+  try {
+    setBusy(ui.processJobs, true);
+    const res = await api(`/tables/${state.selectedTable}/jobs/process`, { method: "POST" });
+    showToast(`Processed ${res.processed} embedding jobs.`, "success");
+    await loadTable(state.selectedTable);
+    renderSelectedTable();
+  } catch (err) {
+    showToast(err.message, "error");
+  } finally {
+    setBusy(ui.processJobs, false);
+  }
+}
+
+async function flushTable() {
+  if (!state.selectedTable) return showToast("Select a table first.", "error");
+  try {
+    setBusy(ui.flushTable, true);
+    await api(`/tables/${state.selectedTable}/flush`, { method: "POST" });
+    showToast("Flushed table to SST.", "success");
+    await loadTable(state.selectedTable);
+    renderSelectedTable();
+  } catch (err) {
+    showToast(err.message, "error");
+  } finally {
+    setBusy(ui.flushTable, false);
+  }
+}
+
+async function compactTable() {
+  if (!state.selectedTable) return showToast("Select a table first.", "error");
+  try {
+    setBusy(ui.compactTable, true);
+    await api(`/tables/${state.selectedTable}/compact`, { method: "POST" });
+    showToast("Compacted table.", "success");
+    await loadTable(state.selectedTable);
+    renderSelectedTable();
+  } catch (err) {
+    showToast(err.message, "error");
+  } finally {
+    setBusy(ui.compactTable, false);
+  }
+}
+
+async function runSearch() {
+  if (!state.selectedTable) return showToast("Select a table first.", "error");
+  const query_text = ui.searchQuery.value.trim();
+  if (!query_text) return showToast("Search query is empty.", "error");
+  ui.searchResults.innerHTML = "";
+  ui.searchEmpty.style.display = "none";
+  ui.searchResults.innerHTML = `<div class="empty">Searching…</div>`;
+  try {
+    setBusy(ui.searchRun, true);
+    const k = Number(ui.searchK.value || 5);
+    const metric = ui.searchMetric.value;
+    const hits = await api(`/tables/${state.selectedTable}/search-text`, {
+      method: "POST",
+      body: JSON.stringify({ query_text, k, metric }),
+    });
+    if (hits.length === 0) {
+      ui.searchResults.innerHTML = "";
+      ui.searchEmpty.textContent =
+        "No results yet. Process embeddings and try again.";
+      ui.searchEmpty.style.display = "block";
+      return;
+    }
+    const rows = await Promise.all(
+      hits.map(async (hit) => {
+        try {
+          const row = await api(`/tables/${state.selectedTable}/rows/${hit.row_id}`);
+          return { ...hit, row };
+        } catch (err) {
+          return { ...hit, row: null, error: err.message };
+        }
+      })
+    );
+    renderResults(rows);
+  } catch (err) {
+    showToast(err.message, "error");
+  } finally {
+    setBusy(ui.searchRun, false);
+  }
+}
+
+function renderResults(rows) {
+  ui.searchResults.innerHTML = "";
+  ui.searchEmpty.style.display = "none";
+  rows.forEach((hit) => {
+    const card = document.createElement("div");
+    card.className = "result-card";
+    const fields = hit.row?.fields ? JSON.stringify(hit.row.fields, null, 2) : "{}";
+    card.innerHTML = `
+      <div class="result-header">
+        <div class="mono">Row ${hit.row_id}</div>
+        <span class="badge">distance ${hit.distance.toFixed(4)}</span>
+      </div>
+      <pre class="code-block">${fields}</pre>
+    `;
+    ui.searchResults.appendChild(card);
+  });
+}
+
+async function lookupRow() {
+  if (!state.selectedTable) return showToast("Select a table first.", "error");
+  const id = Number(ui.lookupId.value);
+  if (!id) return showToast("Enter a row ID.", "error");
+  try {
+    const row = await api(`/tables/${state.selectedTable}/rows/${id}`);
+    ui.lookupResult.textContent = JSON.stringify(row, null, 2);
+  } catch (err) {
+    ui.lookupResult.textContent = "";
+    showToast(err.message, "error");
+  }
+}
+
+async function seedDemo() {
+  ui.demoStatus.textContent = "Seeding demo…";
+  try {
+    setBusy(ui.demoSeed, true);
+    try {
+      await api("/tables", {
+        method: "POST",
+        body: JSON.stringify({
+          name: demo.name,
+          schema: demo.schema,
+          embedding_fields: demo.embedding_fields,
+        }),
+      });
+    } catch (err) {
+      if (!String(err.message).includes("already exists")) throw err;
+    }
+    for (const row of demo.rows) {
+      await api(`/tables/${demo.name}/rows`, {
+        method: "POST",
+        body: JSON.stringify({ fields: row }),
+      });
+    }
+    await api(`/tables/${demo.name}/jobs/process`, { method: "POST" });
+    ui.demoStatus.textContent = "Demo ready. Select the notes table.";
+    showToast("Demo dataset ready.", "success");
+    await refreshTables();
+    await selectTable(demo.name);
+  } catch (err) {
+    ui.demoStatus.textContent = "Demo failed.";
+    showToast(err.message, "error");
+  } finally {
+    setBusy(ui.demoSeed, false);
+  }
+}
+
+function scheduleAutoProcess(enabled) {
+  if (state.autoProcessTimer) {
+    clearInterval(state.autoProcessTimer);
+    state.autoProcessTimer = null;
+  }
+  if (!enabled) return;
+  state.autoProcessTimer = setInterval(async () => {
+    if (!state.selectedTable) return;
+    try {
+      const stats = await api(`/tables/${state.selectedTable}/stats`);
+      state.stats = stats;
+      renderStats();
+      if (stats.embeddings_pending > 0) {
+        await api(`/tables/${state.selectedTable}/jobs/process`, { method: "POST" });
+        const refreshed = await api(`/tables/${state.selectedTable}/stats`);
+        state.stats = refreshed;
+        renderStats();
+      }
+    } catch (_) {
+      // Silent background errors.
+    }
+  }, 3000);
+}
+
+function registerEvents() {
+  ui.refreshTables.addEventListener("click", refreshTables);
+  ui.createTable.addEventListener("click", createTable);
+  ui.insertRow.addEventListener("click", insertRow);
+  ui.processJobs.addEventListener("click", processJobs);
+  ui.flushTable.addEventListener("click", flushTable);
+  ui.compactTable.addEventListener("click", compactTable);
+  ui.searchRun.addEventListener("click", runSearch);
+  ui.lookupRow.addEventListener("click", lookupRow);
+  ui.demoSeed.addEventListener("click", seedDemo);
+  ui.demoSearch.addEventListener("click", () => {
+    ui.searchQuery.value = "team meeting notes";
+    runSearch();
+  });
+  ui.createTemplate.addEventListener("change", (e) => applyTemplate(e.target.value));
+  ui.autoProcess.addEventListener("change", (e) => scheduleAutoProcess(e.target.checked));
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "/") {
+      event.preventDefault();
+      ui.searchQuery.focus();
+    }
+    if (event.key.toLowerCase() === "i") {
+      ui.insertJson.focus();
+    }
+  });
+}
+
+async function init() {
+  applyTemplate("notes");
+  await checkHealth();
+  await refreshTables();
+  registerEvents();
+}
+
+init();

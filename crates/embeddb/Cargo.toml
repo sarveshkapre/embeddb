@@ -1,6 +1,7 @@
 [package]
 name = "embeddb"
 version = "0.1.0"
+description = "Rust embedded database with WAL + LSM and automatic per-row embeddings for local-first vector search."
 edition.workspace = true
 license.workspace = true
 repository.workspace = true

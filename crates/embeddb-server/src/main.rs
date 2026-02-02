@@ -20,8 +20,8 @@ use serde::Deserialize;
 #[cfg(feature = "http")]
 use axum::{
     extract::{Path, State},
-    http::StatusCode,
-    response::{IntoResponse, Response},
+    http::{header, StatusCode},
+    response::{Html, IntoResponse, Response},
     routing::{get, post},
     Json, Router,
 };
@@ -492,6 +492,15 @@ impl Embedder for LocalHashEmbedder {
     }
 }
 
+#[cfg(feature = "http")]
+const INDEX_HTML: &str = include_str!("ui/index.html");
+#[cfg(feature = "http")]
+const APP_JS: &str = include_str!("ui/app.js");
+#[cfg(feature = "http")]
+const STYLES_CSS: &str = include_str!("ui/styles.css");
+#[cfg(feature = "http")]
+const FAVICON_SVG: &str = include_str!("ui/favicon.svg");
+
 fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env())
@@ -520,6 +529,10 @@ fn run_http() -> Result<()> {
     let state = Arc::new(AppState { db });
 
     let app = Router::new()
+        .route("/", get(ui_index))
+        .route("/assets/app.js", get(ui_app_js))
+        .route("/assets/styles.css", get(ui_styles))
+        .route("/favicon.svg", get(ui_favicon))
         .route("/health", get(health))
         .route("/tables", get(list_tables).post(create_table))
         .route("/tables/:table", get(describe_table))
@@ -591,6 +604,44 @@ impl IntoResponse for ApiError {
 #[cfg(feature = "http")]
 async fn health() -> impl IntoResponse {
     Json(serde_json::json!({ "status": "ok" }))
+}
+
+#[cfg(feature = "http")]
+async fn ui_index() -> Html<&'static str> {
+    Html(INDEX_HTML)
+}
+
+#[cfg(feature = "http")]
+async fn ui_styles() -> impl IntoResponse {
+    (
+        [
+            (header::CONTENT_TYPE, "text/css; charset=utf-8"),
+            (header::CACHE_CONTROL, "no-store"),
+        ],
+        STYLES_CSS,
+    )
+}
+
+#[cfg(feature = "http")]
+async fn ui_app_js() -> impl IntoResponse {
+    (
+        [
+            (header::CONTENT_TYPE, "text/javascript; charset=utf-8"),
+            (header::CACHE_CONTROL, "no-store"),
+        ],
+        APP_JS,
+    )
+}
+
+#[cfg(feature = "http")]
+async fn ui_favicon() -> impl IntoResponse {
+    (
+        [
+            (header::CONTENT_TYPE, "image/svg+xml; charset=utf-8"),
+            (header::CACHE_CONTROL, "no-store"),
+        ],
+        FAVICON_SVG,
+    )
 }
 
 #[cfg(feature = "http")]
