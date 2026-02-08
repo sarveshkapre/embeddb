@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use anyhow::{anyhow, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 use embeddb::{
-    Column, Config, DataType, DistanceMetric, EmbedDb, Embedder, EmbeddingSpec, TableSchema, Value,
+    Column, Config, DistanceMetric, EmbedDb, Embedder, EmbeddingSpec, TableSchema, Value,
 };
 use serde::Deserialize;
 use tracing_subscriber::EnvFilter;
@@ -273,12 +273,4 @@ fn parse_vector(input: &str) -> Result<Vec<f32>> {
         out.push(num as f32);
     }
     Ok(out)
-}
-
-#[allow(dead_code)]
-fn example_schema() -> TableSchema {
-    TableSchema::new(vec![
-        Column::new("title", DataType::String, false),
-        Column::new("body", DataType::String, false),
-    ])
 }

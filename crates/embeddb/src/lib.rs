@@ -860,4 +860,38 @@ mod tests {
         assert_eq!(stats.embeddings_ready, 1);
         assert_eq!(stats.embeddings_pending, 0);
     }
+
+    #[test]
+    fn compacted_rows_survive_reopen_and_tombstones_hide_deleted_rows() {
+        let dir = tempdir().unwrap();
+        let data_dir = dir.path().to_path_buf();
+        let schema = TableSchema::new(vec![Column::new("title", DataType::String, false)]);
+
+        let db = EmbedDb::open(Config::new(data_dir.clone())).unwrap();
+        db.create_table("notes", schema.clone(), None).unwrap();
+
+        let mut first = BTreeMap::new();
+        first.insert("title".to_string(), Value::String("v1".to_string()));
+        let row_id = db.insert_row("notes", first).unwrap();
+        db.flush_table("notes").unwrap();
+
+        db.compact_table("notes").unwrap();
+        drop(db);
+
+        let reopened = EmbedDb::open(Config::new(data_dir.clone())).unwrap();
+        let row = reopened.get_row("notes", row_id).unwrap().unwrap();
+        assert_eq!(
+            row.fields.get("title"),
+            Some(&Value::String("v1".to_string()))
+        );
+
+        reopened.delete_row("notes", row_id).unwrap();
+        reopened.flush_table("notes").unwrap();
+        reopened.compact_table("notes").unwrap();
+        drop(reopened);
+
+        let reopened_again = EmbedDb::open(Config::new(data_dir)).unwrap();
+        let row = reopened_again.get_row("notes", row_id).unwrap();
+        assert!(row.is_none());
+    }
 }

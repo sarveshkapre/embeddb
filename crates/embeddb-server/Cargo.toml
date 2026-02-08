@@ -21,3 +21,7 @@ tracing-subscriber.workspace = true
 [features]
 http = ["dep:axum", "dep:tokio", "dep:tower-http"]
 contract-tests = ["dep:jsonschema"]
+
+[dev-dependencies]
+tempfile.workspace = true
+tower = { workspace = true, features = ["util"] }

@@ -527,8 +527,30 @@ fn run_http() -> Result<()> {
 
     let db = EmbedDb::open(Config::new(data_dir))?;
     let state = Arc::new(AppState { db });
+    let app = build_router(state);
 
-    let app = Router::new()
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?;
+
+    runtime.block_on(async move {
+        tracing::info!(%addr, "embeddb-server listening");
+        let listener = tokio::net::TcpListener::bind(addr).await?;
+        axum::serve(listener, app).await?;
+        Ok::<(), anyhow::Error>(())
+    })?;
+
+    Ok(())
+}
+
+#[cfg(feature = "http")]
+struct AppState {
+    db: EmbedDb,
+}
+
+#[cfg(feature = "http")]
+fn build_router(state: Arc<AppState>) -> Router {
+    Router::new()
         .route("/", get(ui_index))
         .route("/assets/app.js", get(ui_app_js))
         .route("/assets/styles.css", get(ui_styles))
@@ -548,25 +570,7 @@ fn run_http() -> Result<()> {
         .route("/tables/:table/flush", post(flush_table))
         .route("/tables/:table/compact", post(compact_table))
         .layer(TraceLayer::new_for_http())
-        .with_state(state);
-
-    let runtime = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()?;
-
-    runtime.block_on(async move {
-        tracing::info!(%addr, "embeddb-server listening");
-        let listener = tokio::net::TcpListener::bind(addr).await?;
-        axum::serve(listener, app).await?;
-        Ok::<(), anyhow::Error>(())
-    })?;
-
-    Ok(())
-}
-
-#[cfg(feature = "http")]
-struct AppState {
-    db: EmbedDb,
+        .with_state(state)
 }
 
 #[cfg(feature = "http")]
@@ -703,7 +707,7 @@ async fn table_stats(
 #[cfg(feature = "http")]
 #[derive(Debug, Deserialize)]
 struct InsertRowRequest {
-    fields: BTreeMap<String, Value>,
+    fields: BTreeMap<String, serde_json::Value>,
 }
 
 #[cfg(feature = "http")]
@@ -712,9 +716,19 @@ async fn insert_row(
     Path(table): Path<String>,
     Json(req): Json<InsertRowRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
+    let fields: BTreeMap<String, Value> = req
+        .fields
+        .into_iter()
+        .map(|(key, value)| {
+            json_value_to_embeddb(value)
+                .map(|parsed| (key, parsed))
+                .map_err(|err| ApiError::bad_request(err.to_string()))
+        })
+        .collect::<Result<_, _>>()?;
+
     let row_id = state
         .db
-        .insert_row(&table, req.fields)
+        .insert_row(&table, fields)
         .map_err(|err| ApiError::bad_request(err.to_string()))?;
     Ok((
         StatusCode::CREATED,
@@ -732,7 +746,16 @@ async fn get_row(
         .get_row(&table, row_id)
         .map_err(|err| ApiError::bad_request(err.to_string()))?
     {
-        Some(row) => Ok(Json(row)),
+        Some(row) => {
+            let mut fields = serde_json::Map::new();
+            for (key, value) in row.fields {
+                fields.insert(key, embeddb_value_to_json(value));
+            }
+            Ok(Json(serde_json::json!({
+                "id": row.id,
+                "fields": fields
+            })))
+        }
         None => Err(ApiError::not_found("row not found")),
     }
 }
@@ -834,4 +857,202 @@ async fn compact_table(
         .compact_table(&table)
         .map_err(|err| ApiError::bad_request(err.to_string()))?;
     Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+#[cfg(feature = "http")]
+fn json_value_to_embeddb(value: serde_json::Value) -> Result<Value> {
+    Ok(match value {
+        serde_json::Value::Null => Value::Null,
+        serde_json::Value::Bool(v) => Value::Bool(v),
+        serde_json::Value::Number(v) => {
+            if let Some(i) = v.as_i64() {
+                Value::Int(i)
+            } else if let Some(f) = v.as_f64() {
+                Value::Float(f)
+            } else {
+                return Err(anyhow!("invalid number"));
+            }
+        }
+        serde_json::Value::String(v) => Value::String(v),
+        serde_json::Value::Array(values) => {
+            let bytes: Result<Vec<u8>> = values
+                .into_iter()
+                .map(|item| {
+                    item.as_u64()
+                        .ok_or_else(|| anyhow!("bytes must be u8"))
+                        .and_then(|b| u8::try_from(b).map_err(|_| anyhow!("byte out of range")))
+                })
+                .collect();
+            Value::Bytes(bytes?)
+        }
+        serde_json::Value::Object(_) => return Err(anyhow!("nested objects not supported")),
+    })
+}
+
+#[cfg(feature = "http")]
+fn embeddb_value_to_json(value: Value) -> serde_json::Value {
+    match value {
+        Value::Int(v) => serde_json::json!(v),
+        Value::Float(v) => serde_json::json!(v),
+        Value::Bool(v) => serde_json::json!(v),
+        Value::String(v) => serde_json::json!(v),
+        Value::Bytes(v) => serde_json::json!(v),
+        Value::Null => serde_json::Value::Null,
+    }
+}
+
+#[cfg(all(test, feature = "http"))]
+mod http_smoke_tests {
+    use super::*;
+
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode};
+    use tempfile::tempdir;
+    use tower::util::ServiceExt;
+
+    #[tokio::test]
+    async fn http_smoke_flow() {
+        let dir = tempdir().expect("tempdir");
+        let db = EmbedDb::open(Config::new(dir.path().to_path_buf())).expect("open db");
+        let app = build_router(Arc::new(AppState { db }));
+
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/health")
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(res.status(), StatusCode::OK);
+
+        let create_body = serde_json::json!({
+            "name": "notes",
+            "schema": {
+                "columns": [
+                    { "name": "title", "data_type": "String", "nullable": false },
+                    { "name": "body", "data_type": "String", "nullable": false }
+                ]
+            },
+            "embedding_fields": ["title", "body"]
+        });
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/tables")
+                    .header("content-type", "application/json")
+                    .body(Body::from(create_body.to_string()))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(res.status(), StatusCode::CREATED);
+
+        let insert_body = serde_json::json!({
+            "fields": {
+                "title": "Hello",
+                "body": "World"
+            }
+        });
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/tables/notes/rows")
+                    .header("content-type", "application/json")
+                    .body(Body::from(insert_body.to_string()))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(res.status(), StatusCode::CREATED);
+
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/tables/notes/jobs/process")
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(res.status(), StatusCode::OK);
+
+        let search_body = serde_json::json!({
+            "query_text": "Hello\nWorld",
+            "k": 1
+        });
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/tables/notes/search-text")
+                    .header("content-type", "application/json")
+                    .body(Body::from(search_body.to_string()))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(res.status(), StatusCode::OK);
+
+        let bytes = axum::body::to_bytes(res.into_body(), usize::MAX)
+            .await
+            .expect("body");
+        let hits: serde_json::Value = serde_json::from_slice(&bytes).expect("json");
+        let row_id = hits
+            .as_array()
+            .and_then(|v| v.first())
+            .and_then(|v| v.get("row_id"))
+            .and_then(|v| v.as_u64())
+            .expect("row_id");
+        assert_eq!(row_id, 1);
+
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/tables/notes/flush")
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(res.status(), StatusCode::OK);
+
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/tables/notes/compact")
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(res.status(), StatusCode::OK);
+
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/tables/notes/rows/1")
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(res.status(), StatusCode::OK);
+    }
 }
