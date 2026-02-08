@@ -54,6 +54,11 @@ curl -s -X POST http://127.0.0.1:8080/tables/notes/flush
 curl -s -X POST http://127.0.0.1:8080/tables/notes/compact
 ```
 
+HTTP contract + route smoke tests:
+```bash
+cargo test -p embeddb-server --features http,contract-tests
+```
+
 Full HTTP reference: `docs/HTTP.md`.
 
 ## Repository layout

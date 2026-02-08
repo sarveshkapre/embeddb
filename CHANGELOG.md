@@ -1,6 +1,13 @@
 # CHANGELOG
 
 ## Unreleased
+- Stabilized CI `Gitleaks` scanning by fetching full git history in workflow checkout.
+- Made `dependency-review` non-blocking when unsupported by repository settings.
+- Added explicit CI coverage for `embeddb-server` HTTP + contract/smoke tests.
+- Added HTTP route smoke test covering create/insert/process/search/flush/compact flow.
+- Fixed HTTP row JSON handling to accept natural JSON values and return plain row fields.
+- Added compaction/reopen regression coverage for row visibility after delete tombstones.
+- Removed dead CLI sample schema helper.
 - Added table introspection APIs (`list_tables`, `describe_table`) and CLI commands (`list-tables`, `describe-table`).
 - Added `embeddb-cli search-text` to embed query text and run kNN search without manual vectors.
 - Made kNN sort robust against non-finite distances.

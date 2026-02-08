@@ -12,9 +12,9 @@ The HTTP server also serves a built-in UI at `http://127.0.0.1:8080`. Use it to 
 insert rows, process embedding jobs, and run text search.
 
 ## Contract tests
-This repo includes JSON Schema-based contract tests for request payloads:
+This repo includes JSON Schema-based contract tests for request payloads and an HTTP route smoke test:
 ```bash
-cargo test -p embeddb-server --features contract-tests
+cargo test -p embeddb-server --features http,contract-tests
 ```
 The contract tests also validate core response and error shapes, including list/describe/stats/search and row CRUD/flush/compact responses.
 
