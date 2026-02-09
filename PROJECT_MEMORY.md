@@ -26,4 +26,38 @@
 - Confidence: high
 - Trust label: verified-local-smoke
 - Follow-ups:
-  - Capture and upload server log artifacts on CI smoke failure.
+  - (done) Capture and upload server log artifacts on CI smoke failure.
+
+### 2026-02-09: Add operator controls for embedding job lifecycle (retry + bounded processing)
+- Decision:
+  - Added `retry_failed_jobs` to reset `failed` jobs back to `pending`.
+  - Added bounded processing via `process_pending_jobs_with_limit` and exposed it via CLI (`process-jobs --limit`) and HTTP (`/tables/:table/jobs/process?limit=`).
+  - Made `list_embedding_jobs` deterministic (sorted by `row_id`) for stable CLI/HTTP output.
+- Why: Production operators need a safe way to recover from transient embedder failures and to bound job processing latency per request.
+- Evidence:
+  - `crates/embeddb/src/lib.rs` (new APIs + tests)
+  - `crates/embeddb-cli/src/main.rs`
+  - `crates/embeddb-server/src/main.rs`
+  - `docs/HTTP.md`
+- Commit: `de72907019a7c52142738fced4dd479bc5ef5b53`
+- Confidence: high
+- Trust label: verified-local-tests
+
+### 2026-02-09: Upload HTTP process smoke logs as CI artifacts on failure
+- Decision: Preserve smoke logs via `EMBEDDB_SMOKE_DIR` and upload them as a GitHub Actions artifact when the smoke step fails.
+- Why: Faster CI diagnosis when the server fails to start or endpoints regress.
+- Evidence:
+  - `.github/workflows/ci.yml`
+  - `scripts/http_process_smoke.sh`
+  - `.gitignore`
+- Commit: `82012e33e08cf0154b5f8f2ef5de3a4c99f0c3c6`
+- Confidence: high
+- Trust label: verified-local-smoke
+
+## Verification Evidence
+- `cargo fmt --all -- --check` (pass)
+- `cargo clippy --workspace --all-targets -- -D warnings` (pass)
+- `cargo test --workspace` (pass)
+- `cargo test -p embeddb-server --features http,contract-tests` (pass)
+- `bash scripts/http_process_smoke.sh` (pass)
+- `cargo build --workspace` (pass)
