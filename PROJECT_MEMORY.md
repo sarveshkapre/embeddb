@@ -2,6 +2,20 @@
 
 ## Decisions
 
+### 2026-02-09: Add bounded background embedding retries/backoff (persisted in WAL)
+- Decision: Track per-row embedding retry metadata (`attempts`, `next_retry_at_ms`) and apply exponential backoff; only mark jobs `failed` after exceeding max attempts.
+- Why: Make background embedding processing more production-safe by avoiding tight failure loops while still converging without manual operator intervention for transient failures.
+- Evidence:
+  - `crates/embeddb/src/schema.rs` (`EmbeddingMeta`)
+  - `crates/embeddb/src/storage/wal.rs` (`WalRecord::UpdateEmbeddingStatus` backward-compatible fields)
+  - `crates/embeddb/src/lib.rs` (`process_pending_jobs_internal_at`, retry scheduling)
+  - Tests: `tests::embedding_retry_backoff_defers_until_next_retry_time`, `tests::retry_failed_embedding_job_resets_status_and_error`
+- Commit: `5f674804fd17041435b66242ebc8042961883984`
+- Confidence: high
+- Trust label: trusted
+- Follow-ups:
+  - Expose retry metadata in a user-facing surface (CLI/HTTP) or add counters for retry rate.
+
 ### 2026-02-09: Unify row visibility across memtable and SST for core mutation/read paths
 - Decision: Added shared SST-aware row lookup helpers and reused them in `update_row`, `delete_row`, `get_row`, and `process_pending_jobs`.
 - Why: Core behavior diverged by path; updates required memtable residency and pending embeddings could stall after flush/reopen.
@@ -73,3 +87,4 @@
 - `cargo test -p embeddb-server --features http,contract-tests` (pass)
 - `bash scripts/http_process_smoke.sh` (pass)
 - `cargo build --workspace` (pass)
+- `make check` (pass)

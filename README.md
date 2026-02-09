@@ -10,7 +10,7 @@ Primary writes commit durably first; embedding jobs then run asynchronously with
 
 ## Key goals
 - Durable primary writes before embedding jobs
-- Per-row embedding jobs with status (`pending`, `ready`, `failed`) and content hash
+- Per-row embedding jobs with status (`pending`, `ready`, `failed`) and content hash (with bounded retries/backoff before terminal `failed`)
 - Vector kNN search (cosine/L2) — brute-force MVP → HNSW v1
 - Pluggable local-first embedder, optional remote embedder feature flag
 - Observability + crash-recovery tests

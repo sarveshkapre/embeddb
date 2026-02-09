@@ -7,18 +7,28 @@
 - Gaps found during codebase exploration
 
 ## Candidate Features To Do
-- [ ] P2: Add lightweight metrics counters (embedding throughput, WAL sync counts, compaction durations).
-  Score: impact med | effort med | strategic fit med | differentiation low | risk low | confidence med
-- [ ] P2: Implement embedding retry/backoff with bounded metadata (attempt count + next retry time).
-  Score: impact med | effort med-high | strategic fit high | differentiation med | risk med | confidence med
-- [ ] P2: Implement WAL checkpoint/truncation strategy (prevent unbounded WAL growth).
+- [ ] P1: Implement WAL checkpoint/truncation strategy to prevent unbounded WAL growth (with crash-recovery tests).
   Score: impact high | effort high | strategic fit high | differentiation low | risk med-high | confidence low-med
-- [ ] P2: Re-enable blocking dependency-review once repository security/dependency-graph support is confirmed.
+- [ ] P1: Add metadata filtering to kNN search (simple `where` on scalar columns: equality + numeric ranges).
+  Score: impact high | effort med-high | strategic fit high | differentiation med | risk med | confidence low-med
+- [ ] P2: Add lightweight metrics counters (embedding throughput, WAL sync counts, flush/compaction durations) exposed via stats.
+  Score: impact med | effort med | strategic fit med | differentiation low | risk low-med | confidence med
+- [ ] P2: Bulk ingest CLI (`ingest-jsonl`/`ingest-csv`) with progress and resumable embedding processing.
+  Score: impact med-high | effort med-high | strategic fit high | differentiation low-med | risk low-med | confidence med
+- [ ] P2: Portable snapshot export/restore (copy-only backups for `data_dir`, with safety checks).
+  Score: impact med-high | effort med | strategic fit med-high | differentiation low | risk med | confidence med
+- [ ] P2: Re-enable blocking `dependency-review` once dependency graph support is confirmed in repo settings.
   Score: impact low-med | effort low | strategic fit med | differentiation none | risk low | confidence med
-- [ ] P3: Add HNSW v1 index path for large-table search latency reduction (persisted index + rebuild strategy).
+- [ ] P3: HNSW v1 index for large-table search latency reduction (persisted index + rebuild strategy).
   Score: impact high | effort high | strategic fit high | differentiation med | risk med-high | confidence low
+- [ ] P3: Hybrid keyword + vector search (simple term match or BM25 + vector rerank hook).
+  Score: impact med-high | effort high | strategic fit med-high | differentiation med | risk med | confidence low
+- [ ] P3: Randomized/crash-recovery harness for WAL + flush/compact + reopen visibility invariants.
+  Score: impact med-high | effort med-high | strategic fit high | differentiation low | risk med | confidence low-med
 
 ## Implemented
+- [x] 2026-02-09: Added background embedding retry/backoff with bounded metadata (`attempts`, `next_retry_at_ms`) persisted in WAL.
+  Evidence: `crates/embeddb/src/schema.rs` (`EmbeddingMeta`), `crates/embeddb/src/storage/wal.rs` (`WalRecord::UpdateEmbeddingStatus`), `crates/embeddb/src/lib.rs` (retry scheduler), tests `tests::embedding_retry_backoff_defers_until_next_retry_time`, `tests::retry_failed_embedding_job_resets_status_and_error`.
 - [x] 2026-02-09: Added DB stats API (`db_stats`, CLI `db-stats`, HTTP `GET /stats`) including WAL size visibility (`wal_bytes`).
   Evidence: `crates/embeddb/src/lib.rs` (`DbStats`, `db_stats`), `crates/embeddb-cli/src/main.rs` (`db-stats`), `crates/embeddb-server/src/main.rs` (`GET /stats`), `docs/HTTP.md`, contract test `db_stats_response_schema`.
 - [x] 2026-02-09: Added `retry-failed` embedding jobs (core + CLI + HTTP) to unblock operators after transient embedder failures.
@@ -67,6 +77,7 @@
 - Market scan sources (untrusted): pgvector https://github.com/pgvector/pgvector
 - Market scan sources (untrusted): sqlite-vector https://github.com/asg017/sqlite-vector
 - Market scan sources (untrusted): Qdrant filtering model https://qdrant.tech/documentation/concepts/filtering/
+- Market scan sources (untrusted): Chroma metadata filtering docs https://docs.trychroma.com/docs/querying-collections/metadata-filtering
 - Gap map: missing: persisted ANN index (HNSW) for larger tables.
 - Gap map: missing: metadata filtering for vector search (at least equality + range on scalar fields).
 - Gap map: weak: observability/ops (metrics, progress, WAL checkpoints).

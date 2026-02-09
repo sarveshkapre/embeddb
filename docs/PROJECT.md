@@ -17,6 +17,6 @@
 - Process-level smoke: `bash scripts/http_process_smoke.sh`
 
 ## Next 3 improvements
-1. Implement background embedding retries/backoff with observability counters.
-2. Add metrics counters for embedding throughput, WAL fsync counts, and compaction durations.
-3. Add HNSW v1 index for faster search on larger datasets.
+1. Implement WAL checkpoint/truncation strategy to prevent unbounded WAL growth.
+2. Add metadata filtering to kNN search (basic equality + numeric range).
+3. Add lightweight metrics counters (embedding throughput/retry rate, WAL fsync counts, compaction durations).
