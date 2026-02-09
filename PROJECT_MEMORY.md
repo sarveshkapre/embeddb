@@ -54,6 +54,18 @@
 - Confidence: high
 - Trust label: verified-local-smoke
 
+### 2026-02-09: Add DB-level stats for operational visibility (tables + WAL bytes)
+- Decision: Added `db_stats` (core), `db-stats` (CLI), and `GET /stats` (HTTP) to expose table count and current WAL size in bytes.
+- Why: WAL growth and overall DB shape are key operational signals; exposing them makes it easier to diagnose slowdowns and validate cleanup work.
+- Evidence:
+  - `crates/embeddb/src/lib.rs`
+  - `crates/embeddb-cli/src/main.rs`
+  - `crates/embeddb-server/src/main.rs`
+  - `docs/HTTP.md`
+- Commit: `1436fa851761529fa6fe40de898a471797090947`
+- Confidence: high
+- Trust label: verified-local-tests
+
 ## Verification Evidence
 - `cargo fmt --all -- --check` (pass)
 - `cargo clippy --workspace --all-targets -- -D warnings` (pass)
