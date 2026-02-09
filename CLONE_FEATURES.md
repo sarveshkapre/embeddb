@@ -7,11 +7,26 @@
 - Gaps found during codebase exploration
 
 ## Candidate Features To Do
+- [ ] P0: Add `retry-failed` embedding jobs (core API + CLI + HTTP) to unblock operators after transient embedder failures.
+  Score: impact high | effort low-med | strategic fit high | differentiation med | risk low | confidence high
+- [ ] P0: Preserve + upload HTTP process-smoke server logs as CI artifacts on failure (script + workflow).
+  Score: impact high | effort low | strategic fit high | differentiation low | risk low | confidence high
+- [ ] P1: Add `process_pending_jobs` limit (core + CLI + HTTP) to keep server requests bounded and predictable.
+  Score: impact med | effort low-med | strategic fit high | differentiation low | risk low | confidence high
+- [ ] P1: Make `list_embedding_jobs` deterministic (sort by `row_id`) to stabilize CLI/HTTP output and tests.
+  Score: impact med | effort low | strategic fit med | differentiation low | risk low | confidence high
+- [ ] P1: Add WAL size visibility (`wal_bytes`) in `table_stats` or a new `db_stats` API for operational awareness.
+  Score: impact med | effort low-med | strategic fit high | differentiation low | risk low | confidence med
+- [ ] P2: Add lightweight metrics counters (embedding throughput, WAL sync counts, compaction durations).
+  Score: impact med | effort med | strategic fit med | differentiation low | risk low | confidence med
+- [ ] P2: Implement embedding retry/backoff with bounded metadata (attempt count + next retry time).
+  Score: impact med | effort med-high | strategic fit high | differentiation med | risk med | confidence med
+- [ ] P2: Implement WAL checkpoint/truncation strategy (prevent unbounded WAL growth).
+  Score: impact high | effort high | strategic fit high | differentiation low | risk med-high | confidence low-med
 - [ ] P2: Re-enable blocking dependency-review once repository security/dependency-graph support is confirmed.
-- [ ] P2: Add metrics counters for embedding throughput, WAL fsync counts, and compaction durations.
-- [ ] P2: Implement background embedding retries/backoff with bounded retry metadata.
-- [ ] P2: Add CI artifact upload for HTTP process-smoke server logs on failure.
-- [ ] P3: Add HNSW v1 index path for large-table search latency reduction.
+  Score: impact low-med | effort low | strategic fit med | differentiation none | risk low | confidence med
+- [ ] P3: Add HNSW v1 index path for large-table search latency reduction (persisted index + rebuild strategy).
+  Score: impact high | effort high | strategic fit high | differentiation med | risk med-high | confidence low
 
 ## Implemented
 - [x] 2026-02-09: Added SST-aware row visibility for `update_row`, so updates now work after flush/compaction.
@@ -47,6 +62,13 @@
 - `process_pending_jobs` previously assumed memtable residency; recovery-safe background work needs shared row visibility semantics.
 - Process-level server smoke catches startup/runtime integration risks that router-only tests cannot surface.
 - CI smoke scripts must avoid assuming optional tools (`rg`) exist on GitHub runners; prefer portable shell utilities.
+- Market scan (untrusted web): vector DB baselines expect fast ANN indexes (HNSW/IVF), metadata filtering, and hybrid retrieval hooks.
+  Sources: DuckDB VSS extension docs, pgvector HNSW, sqlite-vector, Qdrant filter model.
+  Links:
+    - https://duckdb.org/docs/extensions/vss.html
+    - https://github.com/pgvector/pgvector
+    - https://github.com/asg017/sqlite-vector
+    - https://qdrant.tech/documentation/concepts/filtering/
 
 ## Notes
 - This file is maintained by the autonomous clone loop.
