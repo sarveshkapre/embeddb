@@ -31,6 +31,9 @@ jobs:
       - name: Test HTTP feature surface
         run: cargo test -p embeddb-server --features http,contract-tests
 
+      - name: HTTP server process smoke
+        run: bash scripts/http_process_smoke.sh
+
       - name: Build
         run: cargo build --workspace
 
