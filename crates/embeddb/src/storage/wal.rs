@@ -16,6 +16,11 @@ pub enum WalRecord {
         schema: TableSchema,
         embedding_spec: Option<EmbeddingSpec>,
     },
+    /// Persist `next_row_id` so WAL checkpoints can be compact without losing ID allocation state.
+    SetNextRowId {
+        table: String,
+        next_row_id: u64,
+    },
     PutRow {
         table: String,
         row_id: u64,
@@ -66,6 +71,16 @@ impl Wal {
         Ok(Self { path, file })
     }
 
+    pub fn create_new(path: PathBuf) -> Result<Self> {
+        let file = OpenOptions::new()
+            .create(true)
+            .truncate(true)
+            .read(true)
+            .write(true)
+            .open(&path)?;
+        Ok(Self { path, file })
+    }
+
     pub fn append(&mut self, record: &WalRecord, sync: bool) -> Result<()> {
         let data = serde_json::to_vec(record)?;
         let mut hasher = Hasher::new();
@@ -81,6 +96,12 @@ impl Wal {
         if sync {
             self.file.sync_data()?;
         }
+        Ok(())
+    }
+
+    pub fn sync(&mut self) -> Result<()> {
+        self.file.flush()?;
+        self.file.sync_data()?;
         Ok(())
     }
 

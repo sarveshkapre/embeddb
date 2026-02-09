@@ -108,6 +108,12 @@ pub struct DbStats {
     pub wal_bytes: u64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CheckpointStats {
+    pub wal_bytes_before: u64,
+    pub wal_bytes_after: u64,
+}
+
 #[derive(Debug)]
 struct TableState {
     schema: TableSchema,
@@ -141,7 +147,14 @@ pub struct EmbedDb {
 impl EmbedDb {
     pub fn open(config: Config) -> Result<Self> {
         fs::create_dir_all(&config.data_dir)?;
+
         let wal_path = config.data_dir.join("wal.log");
+        let wal_prev_path = config.data_dir.join("wal.prev");
+        // Recover from an interrupted checkpoint where `wal.log` was moved aside but the new WAL
+        // was not promoted yet. In that case, prefer the previous WAL.
+        if !wal_path.exists() && wal_prev_path.exists() {
+            fs::rename(&wal_prev_path, &wal_path)?;
+        }
         let wal = Wal::open(wal_path)?;
 
         let mut state = DbState {
@@ -719,41 +732,7 @@ impl EmbedDb {
             .tables
             .get_mut(table)
             .ok_or_else(|| anyhow!("table not found"))?;
-
-        if table_state.rows.is_empty() && table_state.tombstones.is_empty() {
-            return Ok(());
-        }
-
-        let dir = sst::table_dir(&self._config.data_dir, table);
-        sst::ensure_dir(&dir)?;
-
-        let mut entries: Vec<SstEntry> = Vec::new();
-        for row in table_state.rows.values() {
-            entries.push(SstEntry {
-                row_id: row.id,
-                row: Some(row.clone()),
-            });
-        }
-        for row_id in &table_state.tombstones {
-            entries.push(SstEntry {
-                row_id: *row_id,
-                row: None,
-            });
-        }
-        entries.sort_by_key(|entry| entry.row_id);
-
-        let seq = table_state.next_sst_seq;
-        table_state.next_sst_seq += 1;
-        let path = sst::write_sst(&dir, 0, seq, &entries)?;
-        table_state.sst_files.push(SstFile {
-            level: 0,
-            seq,
-            path,
-        });
-        table_state.rows.clear();
-        table_state.tombstones.clear();
-
-        Ok(())
+        flush_table_state(&self._config.data_dir, table, table_state)
     }
 
     pub fn compact_table(&self, table: &str) -> Result<()> {
@@ -786,6 +765,98 @@ impl EmbedDb {
         }
 
         Ok(())
+    }
+
+    pub fn checkpoint(&self) -> Result<CheckpointStats> {
+        let wal_path = self._config.data_dir.join("wal.log");
+        let wal_prev_path = self._config.data_dir.join("wal.prev");
+        let wal_new_path = self._config.data_dir.join("wal.log.new");
+        let wal_dummy_path = self._config.data_dir.join("wal.checkpoint.tmp");
+
+        let wal_bytes_before = fs::metadata(&wal_path).map(|m| m.len()).unwrap_or(0);
+
+        let mut inner = self.inner.lock().map_err(|_| anyhow!("lock poisoned"))?;
+
+        // Flush all tables so row data is durably in SSTs and the checkpoint WAL can be compact.
+        let table_names: Vec<String> = inner.state.tables.keys().cloned().collect();
+        for table in table_names {
+            let table_state = inner
+                .state
+                .tables
+                .get_mut(&table)
+                .ok_or_else(|| anyhow!("table not found"))?;
+            flush_table_state(&self._config.data_dir, &table, table_state)?;
+        }
+
+        let mut records: Vec<WalRecord> = Vec::new();
+        for (name, table_state) in inner.state.tables.iter() {
+            records.push(WalRecord::CreateTable {
+                name: name.clone(),
+                schema: table_state.schema.clone(),
+                embedding_spec: table_state.embedding_spec.clone(),
+            });
+            records.push(WalRecord::SetNextRowId {
+                table: name.clone(),
+                next_row_id: table_state.next_row_id,
+            });
+
+            for (row_id, meta) in &table_state.embedding_meta {
+                records.push(WalRecord::EnqueueEmbedding {
+                    table: name.clone(),
+                    row_id: *row_id,
+                    content_hash: meta.content_hash.clone(),
+                });
+                records.push(WalRecord::UpdateEmbeddingStatus {
+                    table: name.clone(),
+                    row_id: *row_id,
+                    status: meta.status,
+                    last_error: meta.last_error.clone(),
+                    attempts: Some(meta.attempts),
+                    next_retry_at_ms: Some(meta.next_retry_at_ms),
+                });
+            }
+
+            for (row_id, vector) in &table_state.embeddings {
+                records.push(WalRecord::StoreEmbedding {
+                    table: name.clone(),
+                    row_id: *row_id,
+                    vector: vector.clone(),
+                });
+            }
+        }
+
+        // Write the new WAL snapshot.
+        {
+            let mut new_wal = Wal::create_new(wal_new_path.clone())?;
+            for record in &records {
+                new_wal.append(record, false)?;
+            }
+            new_wal.sync()?;
+        }
+
+        // Ensure `wal.log` is closed during rotation (important for Windows semantics).
+        inner.wal = Wal::create_new(wal_dummy_path.clone())?;
+
+        // Rotate with a `wal.prev` fallback to tolerate crashes between renames.
+        if wal_prev_path.exists() {
+            let _ = fs::remove_file(&wal_prev_path);
+        }
+        if wal_path.exists() {
+            fs::rename(&wal_path, &wal_prev_path)?;
+        }
+        fs::rename(&wal_new_path, &wal_path)?;
+
+        let wal_bytes_after = fs::metadata(&wal_path).map(|m| m.len()).unwrap_or(0);
+
+        inner.wal = Wal::open(wal_path)?;
+
+        let _ = fs::remove_file(&wal_dummy_path);
+        let _ = fs::remove_file(&wal_prev_path);
+
+        Ok(CheckpointStats {
+            wal_bytes_before,
+            wal_bytes_after,
+        })
     }
 }
 
@@ -835,6 +906,11 @@ fn apply_record(state: &mut DbState, record: WalRecord) -> Result<()> {
                     next_sst_seq: 1,
                 },
             );
+        }
+        WalRecord::SetNextRowId { table, next_row_id } => {
+            if let Some(table_state) = state.tables.get_mut(&table) {
+                table_state.next_row_id = next_row_id;
+            }
         }
         WalRecord::PutRow { table, row_id, row } => {
             if let Some(table_state) = state.tables.get_mut(&table) {
@@ -902,6 +978,47 @@ fn apply_record(state: &mut DbState, record: WalRecord) -> Result<()> {
             }
         }
     }
+
+    Ok(())
+}
+
+fn flush_table_state(
+    root: &std::path::Path,
+    table: &str,
+    table_state: &mut TableState,
+) -> Result<()> {
+    if table_state.rows.is_empty() && table_state.tombstones.is_empty() {
+        return Ok(());
+    }
+
+    let dir = sst::table_dir(root, table);
+    sst::ensure_dir(&dir)?;
+
+    let mut entries: Vec<SstEntry> = Vec::new();
+    for row in table_state.rows.values() {
+        entries.push(SstEntry {
+            row_id: row.id,
+            row: Some(row.clone()),
+        });
+    }
+    for row_id in &table_state.tombstones {
+        entries.push(SstEntry {
+            row_id: *row_id,
+            row: None,
+        });
+    }
+    entries.sort_by_key(|entry| entry.row_id);
+
+    let seq = table_state.next_sst_seq;
+    table_state.next_sst_seq += 1;
+    let path = sst::write_sst(&dir, 0, seq, &entries)?;
+    table_state.sst_files.push(SstFile {
+        level: 0,
+        seq,
+        path,
+    });
+    table_state.rows.clear();
+    table_state.tombstones.clear();
 
     Ok(())
 }
@@ -1345,5 +1462,103 @@ mod tests {
             .unwrap();
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].row_id, row_id);
+    }
+
+    #[test]
+    fn checkpoint_truncates_wal_and_preserves_next_row_id() {
+        let dir = tempdir().unwrap();
+        let db = EmbedDb::open(Config::new(dir.path().to_path_buf())).unwrap();
+
+        let schema = TableSchema::new(vec![Column::new("title", DataType::String, false)]);
+        db.create_table("notes", schema, None).unwrap();
+
+        for i in 0..200u64 {
+            let mut fields = BTreeMap::new();
+            fields.insert("title".to_string(), Value::String(format!("row-{i}")));
+            let row_id = db.insert_row("notes", fields).unwrap();
+            assert_eq!(row_id, i + 1);
+        }
+        db.flush_table("notes").unwrap();
+        db.compact_table("notes").unwrap();
+
+        let before = db.db_stats().unwrap().wal_bytes;
+        let stats = db.checkpoint().unwrap();
+        assert_eq!(stats.wal_bytes_before, before);
+        assert!(stats.wal_bytes_after <= stats.wal_bytes_before);
+
+        drop(db);
+        let db = EmbedDb::open(Config::new(dir.path().to_path_buf())).unwrap();
+
+        // Ensure ID allocation continues, even though row data now lives in SSTs.
+        let mut fields = BTreeMap::new();
+        fields.insert("title".to_string(), Value::String("next".to_string()));
+        let row_id = db.insert_row("notes", fields).unwrap();
+        assert_eq!(row_id, 201);
+    }
+
+    #[test]
+    fn checkpoint_preserves_embedding_meta_and_vectors() {
+        let dir = tempdir().unwrap();
+        let db = EmbedDb::open(Config::new(dir.path().to_path_buf())).unwrap();
+
+        let schema = TableSchema::new(vec![
+            Column::new("title", DataType::String, false),
+            Column::new("body", DataType::String, false),
+        ]);
+        let embed_spec = EmbeddingSpec::new(vec!["title", "body"]);
+        db.create_table("notes", schema, Some(embed_spec)).unwrap();
+
+        let mut fields = BTreeMap::new();
+        fields.insert("title".to_string(), Value::String("Hello".to_string()));
+        fields.insert("body".to_string(), Value::String("World".to_string()));
+        let row_id = db.insert_row("notes", fields).unwrap();
+        db.process_pending_jobs("notes", &DummyEmbedder).unwrap();
+
+        // Force row to live on SST so correctness doesn't depend on memtable replay.
+        db.flush_table("notes").unwrap();
+        db.compact_table("notes").unwrap();
+
+        db.checkpoint().unwrap();
+        drop(db);
+
+        let db = EmbedDb::open(Config::new(dir.path().to_path_buf())).unwrap();
+        let jobs = db.list_embedding_jobs("notes").unwrap();
+        assert_eq!(jobs.len(), 1);
+        assert_eq!(jobs[0].row_id, row_id);
+        assert_eq!(jobs[0].status, EmbeddingStatus::Ready);
+
+        let query = DummyEmbedder.embed("Hello\nWorld").unwrap();
+        let hits = db
+            .search_knn("notes", &query, 1, DistanceMetric::L2)
+            .unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].row_id, row_id);
+    }
+
+    #[test]
+    fn open_recovers_from_interrupted_checkpoint_wal_rotation() {
+        let dir = tempdir().unwrap();
+        let config = Config::new(dir.path().to_path_buf());
+        let db = EmbedDb::open(config.clone()).unwrap();
+
+        let schema = TableSchema::new(vec![Column::new("title", DataType::String, false)]);
+        db.create_table("notes", schema, None).unwrap();
+
+        let mut fields = BTreeMap::new();
+        fields.insert("title".to_string(), Value::String("Hello".to_string()));
+        db.insert_row("notes", fields).unwrap();
+        drop(db);
+
+        // Simulate a crash after moving wal.log to wal.prev but before promoting a new wal.log.
+        let wal_path = config.data_dir.join("wal.log");
+        let prev_path = config.data_dir.join("wal.prev");
+        fs::rename(&wal_path, &prev_path).unwrap();
+
+        let db = EmbedDb::open(config).unwrap();
+        let row = db.get_row("notes", 1).unwrap().unwrap();
+        assert_eq!(
+            row.fields.get("title"),
+            Some(&Value::String("Hello".to_string()))
+        );
     }
 }

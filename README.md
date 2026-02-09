@@ -28,6 +28,9 @@ cargo run -p embeddb-cli -- --help
 # List tables
 cargo run -p embeddb-cli -- list-tables
 
+# WAL checkpoint (compact wal.log after flush/compaction cycles)
+cargo run -p embeddb-cli -- checkpoint
+
 # Table stats
 cargo run -p embeddb-cli -- table-stats notes
 

@@ -74,5 +74,9 @@ curl --silent --show-error --fail \
 curl --silent --show-error --fail -X POST "${BASE_URL}/tables/notes/flush" >/dev/null
 curl --silent --show-error --fail -X POST "${BASE_URL}/tables/notes/compact" >/dev/null
 
+CHECKPOINT="$(curl --silent --show-error --fail -X POST "${BASE_URL}/checkpoint")"
+echo "${CHECKPOINT}" | grep -q '"wal_bytes_before"'
+echo "${CHECKPOINT}" | grep -q '"wal_bytes_after"'
+
 ROW="$(curl --silent --show-error --fail "${BASE_URL}/tables/notes/rows/1")"
 echo "${ROW}" | grep -q '"title":"Hello"'

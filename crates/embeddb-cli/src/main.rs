@@ -24,6 +24,7 @@ struct Cli {
 #[derive(Subcommand, Debug)]
 enum Commands {
     DbStats,
+    Checkpoint,
     ListTables,
     DescribeTable {
         table: String,
@@ -137,6 +138,10 @@ fn main() -> Result<()> {
     match cli.command {
         Commands::DbStats => {
             let stats = db.db_stats()?;
+            println!("{}", serde_json::to_string_pretty(&stats)?);
+        }
+        Commands::Checkpoint => {
+            let stats = db.checkpoint()?;
             println!("{}", serde_json::to_string_pretty(&stats)?);
         }
         Commands::ListTables => {

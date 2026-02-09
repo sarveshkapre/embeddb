@@ -36,6 +36,16 @@ curl -s http://127.0.0.1:8080/health
 curl -s http://127.0.0.1:8080/stats
 ```
 
+### WAL checkpoint
+`POST /checkpoint`
+
+Rotates/compacts the WAL to prevent unbounded growth. The checkpoint flushes pending memtable state to SSTs
+and rewrites `wal.log` to a minimal snapshot.
+
+```bash
+curl -s -X POST http://127.0.0.1:8080/checkpoint
+```
+
 ### List tables
 `GET /tables`
 ```bash

@@ -228,6 +228,21 @@ mod contract_tests {
     }
 
     #[test]
+    fn checkpoint_response_schema() {
+        let schema = serde_json::json!({
+            "type": "object",
+            "required": ["wal_bytes_before", "wal_bytes_after"],
+            "properties": {
+                "wal_bytes_before": { "type": "integer", "minimum": 0 },
+                "wal_bytes_after": { "type": "integer", "minimum": 0 }
+            }
+        });
+        let validator = compile_schema(schema);
+        let ok = serde_json::json!({ "wal_bytes_before": 1234, "wal_bytes_after": 12 });
+        assert!(validator.is_valid(&ok));
+    }
+
+    #[test]
     fn create_table_response_schema() {
         let schema = serde_json::json!({
             "type": "object",
@@ -573,6 +588,7 @@ fn build_router(state: Arc<AppState>) -> Router {
         .route("/favicon.svg", get(ui_favicon))
         .route("/health", get(health))
         .route("/stats", get(db_stats))
+        .route("/checkpoint", post(checkpoint))
         .route("/tables", get(list_tables).post(create_table))
         .route("/tables/:table", get(describe_table))
         .route("/tables/:table/stats", get(table_stats))
@@ -633,6 +649,15 @@ async fn db_stats(State(state): State<Arc<AppState>>) -> Result<impl IntoRespons
     state
         .db
         .db_stats()
+        .map(Json)
+        .map_err(|err| ApiError::bad_request(err.to_string()))
+}
+
+#[cfg(feature = "http")]
+async fn checkpoint(State(state): State<Arc<AppState>>) -> Result<impl IntoResponse, ApiError> {
+    state
+        .db
+        .checkpoint()
         .map(Json)
         .map_err(|err| ApiError::bad_request(err.to_string()))
 }
@@ -1107,6 +1132,19 @@ mod http_smoke_tests {
                 Request::builder()
                     .method("POST")
                     .uri("/tables/notes/compact")
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(res.status(), StatusCode::OK);
+
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/checkpoint")
                     .body(Body::empty())
                     .expect("request"),
             )

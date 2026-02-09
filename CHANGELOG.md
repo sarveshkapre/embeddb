@@ -1,6 +1,7 @@
 # CHANGELOG
 
 ## Unreleased
+- Added DB-level WAL checkpoint (`checkpoint`) that flushes tables and rewrites `wal.log` to a compact snapshot (preserving `next_row_id` and embedding state) to prevent unbounded WAL growth.
 - Added background embedding retries with exponential backoff (`attempts` + `next_retry_at_ms`) persisted in WAL; jobs only become `failed` after exceeding max attempts.
 - Added SST-aware row visibility helper so `update_row` now works for rows already flushed to SST files.
 - Fixed embedding job processing to read pending rows from memtable or SST, allowing jobs to complete after flush/reopen.
