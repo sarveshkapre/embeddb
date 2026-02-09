@@ -81,6 +81,8 @@
 - Market scan sources (untrusted): sqlite-vector https://github.com/asg017/sqlite-vector
 - Market scan sources (untrusted): Qdrant filtering model https://qdrant.tech/documentation/concepts/filtering/
 - Market scan sources (untrusted): Chroma metadata filtering docs https://docs.trychroma.com/docs/querying-collections/metadata-filtering
+- Market scan sources (untrusted): Weaviate filters docs https://docs.weaviate.io/weaviate/search/filters
+- Market scan sources (untrusted): Weaviate conditional filters (where) docs https://docs.weaviate.io/weaviate/api/graphql/filters
 - Market scan (untrusted web): WAL-backed systems generally need checkpoint/truncation hooks; SQLite exposes manual + auto-checkpointing, including truncate mode, to bound log growth.
 - Market scan sources (untrusted): SQLite `wal_checkpoint(TRUNCATE)` + `wal_autocheckpoint` docs https://www.sqlite.org/pragma.html
 - Market scan sources (untrusted): pgvector notes on combining ANN with `WHERE` filtering https://github.com/pgvector/pgvector
