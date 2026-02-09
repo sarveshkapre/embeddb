@@ -16,7 +16,7 @@
 - Confidence: high
 - Trust label: verified-local-smoke
 - Follow-ups:
-  - Add opt-in automatic checkpointing when `wal_bytes` crosses a threshold (config + CLI/HTTP override).
+  - (done) Add opt-in automatic checkpointing when `wal_bytes` crosses a threshold (config + CLI/HTTP override).
   - Consider persisting embedding vectors/meta outside WAL to further reduce checkpoint size.
 
 ### 2026-02-09: Add bounded background embedding retries/backoff (persisted in WAL)
@@ -97,12 +97,37 @@
 - Confidence: high
 - Trust label: verified-local-tests
 
+### 2026-02-09: Add metadata filtering for brute-force kNN search (MVP)
+- Decision: Added scalar metadata filtering to brute-force kNN search (MVP `AND` filters: equality + numeric ranges) and exposed it via HTTP and CLI.
+- Why: Vector search without scalar filtering is hard to use in real apps; most practical retrieval needs constraints like `tenant_id`, `is_active`, and numeric ranges.
+- Evidence:
+  - `crates/embeddb/src/lib.rs` (`FilterCondition`, `FilterOp`, `search_knn_filtered`, test `tests::search_knn_filtered_applies_scalar_filters`)
+  - `crates/embeddb-server/src/main.rs` (`filter` parsing + request schema updates)
+  - `crates/embeddb-cli/src/main.rs` (`search --filter`, `search-text --filter`)
+  - Smoke: `bash scripts/http_process_smoke.sh` (filtered search assertion)
+  - Docs: `docs/HTTP.md`, `README.md`
+- Commit: `58f058a760655cfc91cf80267f8a41f52814dbc4`
+- Confidence: med-high
+- Trust label: verified-local-smoke
+- Follow-ups:
+  - Add filter pushdown (avoid per-hit SST point lookups) once storage gains a columnar/secondary index surface.
+
+### 2026-02-09: Add opt-in WAL auto-checkpointing (byte threshold)
+- Decision: Added `Config.wal_autocheckpoint_bytes` which triggers a preflight WAL `checkpoint()` before any operation that appends to WAL when `wal.log` is at/above the threshold.
+- Why: Operators need a low-touch way to keep WAL growth bounded without external orchestration, while avoiding error-after-success semantics for writes.
+- Evidence:
+  - `crates/embeddb/src/lib.rs` (`Config::with_wal_autocheckpoint_bytes`, `preflight_wal_autocheckpoint`, test `tests::wal_autocheckpoint_triggers_before_write`)
+  - `crates/embeddb-server/src/main.rs` (`EMBEDDB_WAL_AUTOCHECKPOINT_BYTES`)
+  - `crates/embeddb-cli/src/main.rs` (`--wal-autocheckpoint-bytes`)
+  - Docs: `docs/HTTP.md`, `README.md`
+- Commit: `58f058a760655cfc91cf80267f8a41f52814dbc4`
+- Confidence: high
+- Trust label: verified-local-tests
+
 ## Verification Evidence
-- `cargo fmt --all -- --check` (pass)
+- `cargo fmt --all` (pass)
 - `cargo clippy --workspace --all-targets -- -D warnings` (pass)
 - `cargo test --workspace` (pass)
 - `cargo test -p embeddb-server --features http,contract-tests` (pass)
 - `bash scripts/http_process_smoke.sh` (pass)
-- `cargo build --workspace` (pass)
 - `make check` (pass)
-- `cargo run -p embeddb-cli -- --data-dir <tmp> checkpoint` (pass)

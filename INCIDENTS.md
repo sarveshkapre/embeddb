@@ -35,3 +35,13 @@
 - Prevention rules:
   - CI helper scripts should rely on portable shell/coreutils by default.
   - If non-default tools are required, install them explicitly in workflow setup.
+
+## 2026-02-09: JSON Schema contract tests incorrectly used `oneOf` for numeric values
+- Status: fixed
+- Impact: Contract tests rejected valid payloads containing integers because JSON Schema `oneOf` treats `integer` as a subset of `number`, causing a value like `21` to match multiple branches and fail validation.
+- Detection: Local failing test `contract_tests::search_request_schema` after adding filtered search.
+- Root cause: Request/response schemas used `oneOf` to represent scalar JSON value unions, including both `integer` and `number`.
+- Fix:
+  - Switched scalar value unions to `anyOf` for the overlapping numeric domains.
+- Prevention rules:
+  - For JSON Schema unions that include overlapping types (for example `integer` + `number`), prefer `anyOf` or make the branches mutually exclusive.

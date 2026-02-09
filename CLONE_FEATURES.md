@@ -7,10 +7,6 @@
 - Gaps found during codebase exploration
 
 ## Candidate Features To Do
-- [ ] P1: Add metadata filtering to kNN search (simple `where` on scalar columns: equality + numeric ranges).
-  Score: impact high | effort med-high | strategic fit high | differentiation med | risk med | confidence low-med
-- [ ] P1: Add automatic WAL checkpointing when `wal_bytes` crosses a threshold (opt-in config, plus CLI/HTTP override).
-  Score: impact high | effort med | strategic fit high | differentiation low | risk low-med | confidence med
 - [ ] P2: Add lightweight metrics counters (embedding throughput, WAL sync counts, flush/compaction durations) exposed via stats.
   Score: impact med | effort med | strategic fit med | differentiation low | risk low-med | confidence med
 - [ ] P2: Bulk ingest CLI (`ingest-jsonl`/`ingest-csv`) with progress and resumable embedding processing.
@@ -27,6 +23,10 @@
   Score: impact med-high | effort med-high | strategic fit high | differentiation low | risk med | confidence low-med
 
 ## Implemented
+- [x] 2026-02-09: Added metadata filtering to brute-force kNN search (MVP `AND` filters: equality + numeric ranges) exposed via CLI/HTTP, plus process-smoke coverage.
+  Evidence: `crates/embeddb/src/lib.rs` (`FilterCondition`, `FilterOp`, `search_knn_filtered`, tests `search_knn_filtered_applies_scalar_filters`), `crates/embeddb-cli/src/main.rs` (`search --filter`, `search-text --filter`), `crates/embeddb-server/src/main.rs` (`filter` request support), `docs/HTTP.md` and `README.md` examples, `scripts/http_process_smoke.sh` (filtered search assertion).
+- [x] 2026-02-09: Added opt-in WAL auto-checkpointing when `wal.log` crosses a configured byte threshold (preflight checkpoint before WAL appends).
+  Evidence: `crates/embeddb/src/lib.rs` (`Config::with_wal_autocheckpoint_bytes`, `preflight_wal_autocheckpoint`, test `wal_autocheckpoint_triggers_before_write`), `crates/embeddb-cli/src/main.rs` (`--wal-autocheckpoint-bytes`), `crates/embeddb-server/src/main.rs` (`EMBEDDB_WAL_AUTOCHECKPOINT_BYTES`), `docs/HTTP.md` and `README.md`.
 - [x] 2026-02-09: Added DB-level WAL checkpoint that flushes tables and rewrites `wal.log` to a compact snapshot (preserving `next_row_id` and embedding state), exposed via CLI and HTTP.
   Evidence: `crates/embeddb/src/lib.rs` (`checkpoint`, `CheckpointStats`, WAL rotation + recovery), `crates/embeddb/src/storage/wal.rs` (`WalRecord::SetNextRowId`, `create_new`), `crates/embeddb-cli/src/main.rs` (`checkpoint`), `crates/embeddb-server/src/main.rs` (`POST /checkpoint` + contract/smoke coverage), `scripts/http_process_smoke.sh` (checkpoint call), tests `checkpoint_truncates_wal_and_preserves_next_row_id`, `checkpoint_preserves_embedding_meta_and_vectors`, `open_recovers_from_interrupted_checkpoint_wal_rotation`.
 - [x] 2026-02-09: Added background embedding retry/backoff with bounded metadata (`attempts`, `next_retry_at_ms`) persisted in WAL.
@@ -71,6 +71,7 @@
 ## Insights
 - `gitleaks` failures were caused by shallow checkout history during commit-range scans, not leaked secrets.
 - JSON schema contract tests alone missed runtime serde behavior; an in-process HTTP smoke test caught a real API mismatch.
+- JSON Schema contract tests should prefer `anyOf` over `oneOf` for overlapping numeric domains (`integer` vs `number`) to avoid false negatives.
 - `process_pending_jobs` previously assumed memtable residency; recovery-safe background work needs shared row visibility semantics.
 - Process-level server smoke catches startup/runtime integration risks that router-only tests cannot surface.
 - CI smoke scripts must avoid assuming optional tools (`rg`) exist on GitHub runners; prefer portable shell utilities.
