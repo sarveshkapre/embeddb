@@ -407,10 +407,80 @@ impl EmbedDb {
             });
         }
 
+        // Deterministic output for CLI/HTTP consumers.
+        jobs.sort_by_key(|job| job.row_id);
         Ok(jobs)
     }
 
+    pub fn retry_failed_jobs(&self, table: &str, row_id: Option<u64>) -> Result<usize> {
+        let to_retry: Vec<u64> = {
+            let inner = self.inner.lock().map_err(|_| anyhow!("lock poisoned"))?;
+            let table_state = inner
+                .state
+                .tables
+                .get(table)
+                .ok_or_else(|| anyhow!("table not found"))?;
+
+            let mut out = Vec::new();
+            for (id, meta) in &table_state.embedding_meta {
+                if meta.status != EmbeddingStatus::Failed {
+                    continue;
+                }
+                if let Some(filter) = row_id {
+                    if *id != filter {
+                        continue;
+                    }
+                }
+                if row_exists(table_state, *id)? {
+                    out.push(*id);
+                }
+            }
+            out
+        };
+
+        let mut retried = 0usize;
+        for id in to_retry {
+            let mut inner = self.inner.lock().map_err(|_| anyhow!("lock poisoned"))?;
+            let status_record = WalRecord::UpdateEmbeddingStatus {
+                table: table.to_string(),
+                row_id: id,
+                status: EmbeddingStatus::Pending,
+                last_error: None,
+            };
+            inner.wal.append(&status_record, true)?;
+
+            if let Some(table_state) = inner.state.tables.get_mut(table) {
+                if let Some(meta) = table_state.embedding_meta.get_mut(&id) {
+                    meta.status = EmbeddingStatus::Pending;
+                    meta.last_error = None;
+                }
+            }
+
+            retried += 1;
+        }
+
+        Ok(retried)
+    }
+
     pub fn process_pending_jobs(&self, table: &str, embedder: &dyn Embedder) -> Result<usize> {
+        self.process_pending_jobs_internal(table, embedder, None)
+    }
+
+    pub fn process_pending_jobs_with_limit(
+        &self,
+        table: &str,
+        embedder: &dyn Embedder,
+        limit: usize,
+    ) -> Result<usize> {
+        self.process_pending_jobs_internal(table, embedder, Some(limit))
+    }
+
+    fn process_pending_jobs_internal(
+        &self,
+        table: &str,
+        embedder: &dyn Embedder,
+        limit: Option<usize>,
+    ) -> Result<usize> {
         let pending_jobs: Vec<(u64, String)> = {
             let inner = self.inner.lock().map_err(|_| anyhow!("lock poisoned"))?;
             let table_state = inner
@@ -425,13 +495,27 @@ impl EmbedDb {
             };
 
             let mut jobs = Vec::new();
-            for (row_id, meta) in &table_state.embedding_meta {
-                if meta.status != EmbeddingStatus::Pending {
-                    continue;
-                }
-                if let Some(row) = load_row(table_state, *row_id)? {
+
+            let mut pending_row_ids: Vec<u64> = table_state
+                .embedding_meta
+                .iter()
+                .filter_map(|(row_id, meta)| {
+                    if meta.status == EmbeddingStatus::Pending {
+                        Some(*row_id)
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            pending_row_ids.sort();
+            if let Some(limit) = limit {
+                pending_row_ids.truncate(limit);
+            }
+
+            for row_id in pending_row_ids {
+                if let Some(row) = load_row(table_state, row_id)? {
                     let input = spec.input_string(&row.fields)?;
-                    jobs.push((*row_id, input));
+                    jobs.push((row_id, input));
                 }
             }
             jobs
@@ -731,6 +815,14 @@ mod tests {
         }
     }
 
+    struct AlwaysFailEmbedder;
+
+    impl Embedder for AlwaysFailEmbedder {
+        fn embed(&self, _input: &str) -> Result<Vec<f32>> {
+            Err(anyhow!("boom"))
+        }
+    }
+
     #[test]
     fn insert_and_process_embedding_job() {
         let dir = tempdir().unwrap();
@@ -758,6 +850,89 @@ mod tests {
 
         let jobs = db.list_embedding_jobs("notes").unwrap();
         assert_eq!(jobs[0].status, EmbeddingStatus::Ready);
+    }
+
+    #[test]
+    fn retry_failed_embedding_job_resets_status_and_error() {
+        let dir = tempdir().unwrap();
+        let db = EmbedDb::open(Config::new(dir.path().to_path_buf())).unwrap();
+
+        let schema = TableSchema::new(vec![
+            Column::new("title", DataType::String, false),
+            Column::new("body", DataType::String, false),
+        ]);
+        let embed_spec = EmbeddingSpec::new(vec!["title", "body"]);
+        db.create_table("notes", schema, Some(embed_spec)).unwrap();
+
+        let mut fields = BTreeMap::new();
+        fields.insert("title".to_string(), Value::String("Hello".to_string()));
+        fields.insert("body".to_string(), Value::String("World".to_string()));
+
+        let row_id = db.insert_row("notes", fields).unwrap();
+
+        let processed = db
+            .process_pending_jobs("notes", &AlwaysFailEmbedder)
+            .unwrap();
+        assert_eq!(processed, 1);
+
+        let jobs = db.list_embedding_jobs("notes").unwrap();
+        assert_eq!(jobs.len(), 1);
+        assert_eq!(jobs[0].row_id, row_id);
+        assert_eq!(jobs[0].status, EmbeddingStatus::Failed);
+        assert_eq!(jobs[0].last_error.as_deref(), Some("boom"));
+
+        let retried = db.retry_failed_jobs("notes", None).unwrap();
+        assert_eq!(retried, 1);
+
+        let jobs = db.list_embedding_jobs("notes").unwrap();
+        assert_eq!(jobs[0].status, EmbeddingStatus::Pending);
+        assert!(jobs[0].last_error.is_none());
+
+        let processed = db.process_pending_jobs("notes", &DummyEmbedder).unwrap();
+        assert_eq!(processed, 1);
+
+        let jobs = db.list_embedding_jobs("notes").unwrap();
+        assert_eq!(jobs[0].status, EmbeddingStatus::Ready);
+        assert!(jobs[0].last_error.is_none());
+    }
+
+    #[test]
+    fn process_pending_jobs_limit_processes_subset() {
+        let dir = tempdir().unwrap();
+        let db = EmbedDb::open(Config::new(dir.path().to_path_buf())).unwrap();
+
+        let schema = TableSchema::new(vec![Column::new("title", DataType::String, false)]);
+        let embed_spec = EmbeddingSpec::new(vec!["title"]);
+        db.create_table("notes", schema, Some(embed_spec)).unwrap();
+
+        for i in 0..3 {
+            let mut fields = BTreeMap::new();
+            fields.insert("title".to_string(), Value::String(format!("note-{i}")));
+            db.insert_row("notes", fields).unwrap();
+        }
+
+        let processed = db
+            .process_pending_jobs_with_limit("notes", &DummyEmbedder, 2)
+            .unwrap();
+        assert_eq!(processed, 2);
+
+        let jobs = db.list_embedding_jobs("notes").unwrap();
+        assert_eq!(jobs.len(), 3);
+        assert_eq!(
+            jobs.iter()
+                .filter(|job| job.status == EmbeddingStatus::Ready)
+                .count(),
+            2
+        );
+        assert_eq!(
+            jobs.iter()
+                .filter(|job| job.status == EmbeddingStatus::Pending)
+                .count(),
+            1
+        );
+
+        let processed = db.process_pending_jobs("notes", &DummyEmbedder).unwrap();
+        assert_eq!(processed, 1);
     }
 
     #[test]

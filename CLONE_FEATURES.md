@@ -7,14 +7,6 @@
 - Gaps found during codebase exploration
 
 ## Candidate Features To Do
-- [ ] P0: Add `retry-failed` embedding jobs (core API + CLI + HTTP) to unblock operators after transient embedder failures.
-  Score: impact high | effort low-med | strategic fit high | differentiation med | risk low | confidence high
-- [ ] P0: Preserve + upload HTTP process-smoke server logs as CI artifacts on failure (script + workflow).
-  Score: impact high | effort low | strategic fit high | differentiation low | risk low | confidence high
-- [ ] P1: Add `process_pending_jobs` limit (core + CLI + HTTP) to keep server requests bounded and predictable.
-  Score: impact med | effort low-med | strategic fit high | differentiation low | risk low | confidence high
-- [ ] P1: Make `list_embedding_jobs` deterministic (sort by `row_id`) to stabilize CLI/HTTP output and tests.
-  Score: impact med | effort low | strategic fit med | differentiation low | risk low | confidence high
 - [ ] P1: Add WAL size visibility (`wal_bytes`) in `table_stats` or a new `db_stats` API for operational awareness.
   Score: impact med | effort low-med | strategic fit high | differentiation low | risk low | confidence med
 - [ ] P2: Add lightweight metrics counters (embedding throughput, WAL sync counts, compaction durations).
@@ -29,6 +21,14 @@
   Score: impact high | effort high | strategic fit high | differentiation med | risk med-high | confidence low
 
 ## Implemented
+- [x] 2026-02-09: Added `retry-failed` embedding jobs (core + CLI + HTTP) to unblock operators after transient embedder failures.
+  Evidence: `crates/embeddb/src/lib.rs` (`retry_failed_jobs`), `crates/embeddb-cli/src/main.rs` (`retry-failed`), `crates/embeddb-server/src/main.rs` (`/tables/:table/jobs/retry-failed`), `docs/HTTP.md`.
+- [x] 2026-02-09: Preserve and upload HTTP process-smoke server logs as CI artifacts on failure.
+  Evidence: `.github/workflows/ci.yml`, `scripts/http_process_smoke.sh`, `.gitignore`.
+- [x] 2026-02-09: Added bounded embedding processing via an optional limit (core + CLI + HTTP).
+  Evidence: `crates/embeddb/src/lib.rs` (`process_pending_jobs_with_limit`), `crates/embeddb-cli/src/main.rs` (`process-jobs --limit`), `crates/embeddb-server/src/main.rs` (`/tables/:table/jobs/process?limit=`), `docs/HTTP.md`, test `process_pending_jobs_limit_processes_subset`.
+- [x] 2026-02-09: Made embedding job listing deterministic (sorted by `row_id`).
+  Evidence: `crates/embeddb/src/lib.rs` (`list_embedding_jobs`).
 - [x] 2026-02-09: Added SST-aware row visibility for `update_row`, so updates now work after flush/compaction.
   Evidence: `crates/embeddb/src/lib.rs` (`update_row`, `load_row`, `row_exists`), test `update_row_after_flush_and_compaction`.
 - [x] 2026-02-09: Fixed pending embedding job processing to read rows from memtable or SST and survive reopen.

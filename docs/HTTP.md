@@ -158,8 +158,28 @@ JSON
 
 ### Process embedding jobs
 `POST /tables/:table/jobs/process`
+
+Optional query params:
+- `limit`: max number of pending jobs to process in this request.
+
 ```bash
 curl -s -X POST http://127.0.0.1:8080/tables/notes/jobs/process
+```
+```bash
+curl -s -X POST "http://127.0.0.1:8080/tables/notes/jobs/process?limit=100"
+```
+
+### Retry failed embedding jobs
+`POST /tables/:table/jobs/retry-failed`
+
+Retry all failed jobs:
+```bash
+curl -s -X POST http://127.0.0.1:8080/tables/notes/jobs/retry-failed
+```
+
+Retry a single row:
+```bash
+curl -s -X POST "http://127.0.0.1:8080/tables/notes/jobs/retry-failed?row_id=1"
 ```
 
 ### Flush / Compact

@@ -19,6 +19,7 @@ use serde::Deserialize;
 
 #[cfg(feature = "http")]
 use axum::{
+    extract::Query,
     extract::{Path, State},
     http::{header, StatusCode},
     response::{Html, IntoResponse, Response},
@@ -567,6 +568,7 @@ fn build_router(state: Arc<AppState>) -> Router {
         .route("/tables/:table/search", post(search))
         .route("/tables/:table/search-text", post(search_text))
         .route("/tables/:table/jobs/process", post(process_jobs))
+        .route("/tables/:table/jobs/retry-failed", post(retry_failed_jobs))
         .route("/tables/:table/flush", post(flush_table))
         .route("/tables/:table/compact", post(compact_table))
         .layer(TraceLayer::new_for_http())
@@ -826,13 +828,45 @@ async fn search_text(
 async fn process_jobs(
     State(state): State<Arc<AppState>>,
     Path(table): Path<String>,
+    Query(query): Query<ProcessJobsQuery>,
 ) -> Result<impl IntoResponse, ApiError> {
     let embedder = LocalHashEmbedder;
-    let processed = state
-        .db
-        .process_pending_jobs(&table, &embedder)
-        .map_err(|err| ApiError::bad_request(err.to_string()))?;
+    let processed = match query.limit {
+        Some(limit) => state
+            .db
+            .process_pending_jobs_with_limit(&table, &embedder, limit)
+            .map_err(|err| ApiError::bad_request(err.to_string()))?,
+        None => state
+            .db
+            .process_pending_jobs(&table, &embedder)
+            .map_err(|err| ApiError::bad_request(err.to_string()))?,
+    };
     Ok(Json(serde_json::json!({ "processed": processed })))
+}
+
+#[cfg(feature = "http")]
+#[derive(Debug, Deserialize)]
+struct ProcessJobsQuery {
+    limit: Option<usize>,
+}
+
+#[cfg(feature = "http")]
+#[derive(Debug, Deserialize)]
+struct RetryFailedQuery {
+    row_id: Option<u64>,
+}
+
+#[cfg(feature = "http")]
+async fn retry_failed_jobs(
+    State(state): State<Arc<AppState>>,
+    Path(table): Path<String>,
+    Query(query): Query<RetryFailedQuery>,
+) -> Result<impl IntoResponse, ApiError> {
+    let retried = state
+        .db
+        .retry_failed_jobs(&table, query.row_id)
+        .map_err(|err| ApiError::bad_request(err.to_string()))?;
+    Ok(Json(serde_json::json!({ "retried": retried })))
 }
 
 #[cfg(feature = "http")]

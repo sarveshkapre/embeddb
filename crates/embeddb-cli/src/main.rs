@@ -55,6 +55,13 @@ enum Commands {
     },
     ProcessJobs {
         table: String,
+        #[arg(long)]
+        limit: Option<usize>,
+    },
+    RetryFailed {
+        table: String,
+        #[arg(long)]
+        row_id: Option<u64>,
     },
     Search {
         table: String,
@@ -175,9 +182,18 @@ fn main() -> Result<()> {
             let jobs = db.list_embedding_jobs(&table)?;
             println!("{}", serde_json::to_string_pretty(&jobs)?);
         }
-        Commands::ProcessJobs { table } => {
-            let processed = db.process_pending_jobs(&table, &LocalHashEmbedder)?;
+        Commands::ProcessJobs { table, limit } => {
+            let processed = match limit {
+                Some(limit) => {
+                    db.process_pending_jobs_with_limit(&table, &LocalHashEmbedder, limit)?
+                }
+                None => db.process_pending_jobs(&table, &LocalHashEmbedder)?,
+            };
             println!("{}", processed);
+        }
+        Commands::RetryFailed { table, row_id } => {
+            let retried = db.retry_failed_jobs(&table, row_id)?;
+            println!("{}", retried);
         }
         Commands::Search {
             table,
