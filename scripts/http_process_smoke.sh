@@ -66,5 +66,4 @@ curl --silent --show-error --fail -X POST "${BASE_URL}/tables/notes/flush" >/dev
 curl --silent --show-error --fail -X POST "${BASE_URL}/tables/notes/compact" >/dev/null
 
 ROW="$(curl --silent --show-error --fail "${BASE_URL}/tables/notes/rows/1")"
-echo "${ROW}" | rg '"title":"Hello"' >/dev/null
-
+echo "${ROW}" | grep -q '"title":"Hello"'
