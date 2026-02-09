@@ -6,3 +6,4 @@
 *.swo
 *.log
 /data
+/artifacts

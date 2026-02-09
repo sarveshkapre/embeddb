@@ -33,6 +33,16 @@ jobs:
 
       - name: HTTP server process smoke
         run: bash scripts/http_process_smoke.sh
+        env:
+          EMBEDDB_SMOKE_DIR: artifacts/http_process_smoke
+
+      - name: Upload HTTP smoke logs (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: http-process-smoke-logs
+          path: artifacts/http_process_smoke
+          if-no-files-found: ignore
 
       - name: Build
         run: cargo build --workspace

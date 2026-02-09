@@ -4,7 +4,14 @@ set -euo pipefail
 PORT=$((18080 + RANDOM % 500))
 ADDR="127.0.0.1:${PORT}"
 BASE_URL="http://${ADDR}"
-TMP_DIR="$(mktemp -d)"
+if [[ -n "${EMBEDDB_SMOKE_DIR:-}" ]]; then
+  TMP_DIR="${EMBEDDB_SMOKE_DIR}"
+  mkdir -p "${TMP_DIR}"
+  PRESERVE_TMP_DIR=1
+else
+  TMP_DIR="$(mktemp -d)"
+  PRESERVE_TMP_DIR=0
+fi
 LOG_FILE="${TMP_DIR}/server.log"
 PID=""
 
@@ -13,7 +20,9 @@ cleanup() {
     kill "${PID}" 2>/dev/null || true
     wait "${PID}" 2>/dev/null || true
   fi
-  rm -rf "${TMP_DIR}"
+  if [[ "${PRESERVE_TMP_DIR}" -eq 0 ]]; then
+    rm -rf "${TMP_DIR}"
+  fi
 }
 trap cleanup EXIT
 
