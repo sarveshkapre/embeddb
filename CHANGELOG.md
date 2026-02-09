@@ -7,6 +7,7 @@
 - Improved SST point lookup with binary search in `find_entry` plus storage unit coverage.
 - Added process-level HTTP server smoke script (`scripts/http_process_smoke.sh`) and CI coverage.
 - Made the HTTP process smoke script CI-portable by replacing `rg` dependency with `grep`.
+- Upload HTTP process-smoke logs as a CI artifact on failure for easier diagnosis.
 - Stabilized CI `Gitleaks` scanning by fetching full git history in workflow checkout.
 - Made `dependency-review` non-blocking when unsupported by repository settings.
 - Added explicit CI coverage for `embeddb-server` HTTP + contract/smoke tests.
@@ -18,6 +19,10 @@
 - Added `embeddb-cli search-text` to embed query text and run kNN search without manual vectors.
 - Made kNN sort robust against non-finite distances.
 - Added table stats API and CLI command (`table_stats`, `table-stats`).
+- Added DB stats API and CLI command (`db_stats`, `db-stats`) plus HTTP `GET /stats` for WAL size visibility.
+- Added `retry-failed` embedding jobs (core + CLI + HTTP) to reset transient failures back to `pending`.
+- Added bounded embedding processing via `process_pending_jobs_with_limit` and exposed it via CLI (`process-jobs --limit`) and HTTP (`/tables/:table/jobs/process?limit=`).
+- Made `list_embedding_jobs` deterministic (sorted by `row_id`) for stable CLI/HTTP output.
 - Added optional HTTP server (`embeddb-server`) behind the `http` feature flag for CRUD + search.
 - Added HTTP endpoints for `flush` and `compact`.
 - Added HTTP API reference with example payloads.

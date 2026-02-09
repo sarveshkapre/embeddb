@@ -63,12 +63,15 @@
 - Process-level server smoke catches startup/runtime integration risks that router-only tests cannot surface.
 - CI smoke scripts must avoid assuming optional tools (`rg`) exist on GitHub runners; prefer portable shell utilities.
 - Market scan (untrusted web): vector DB baselines expect fast ANN indexes (HNSW/IVF), metadata filtering, and hybrid retrieval hooks.
-  Sources: DuckDB VSS extension docs, pgvector HNSW, sqlite-vector, Qdrant filter model.
-  Links:
-    - https://duckdb.org/docs/extensions/vss.html
-    - https://github.com/pgvector/pgvector
-    - https://github.com/asg017/sqlite-vector
-    - https://qdrant.tech/documentation/concepts/filtering/
+- Market scan sources (untrusted): DuckDB VSS docs https://duckdb.org/docs/extensions/vss.html
+- Market scan sources (untrusted): pgvector https://github.com/pgvector/pgvector
+- Market scan sources (untrusted): sqlite-vector https://github.com/asg017/sqlite-vector
+- Market scan sources (untrusted): Qdrant filtering model https://qdrant.tech/documentation/concepts/filtering/
+- Gap map: missing: persisted ANN index (HNSW) for larger tables.
+- Gap map: missing: metadata filtering for vector search (at least equality + range on scalar fields).
+- Gap map: weak: observability/ops (metrics, progress, WAL checkpoints).
+- Gap map: parity: durable WAL-first writes + background embeddings + brute-force kNN MVP.
+- Gap map: differentiator: per-row embedding jobs with idempotent status tracking integrated into a local-first embedded DB.
 
 ## Notes
 - This file is maintained by the autonomous clone loop.
