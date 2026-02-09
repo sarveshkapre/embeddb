@@ -2,6 +2,23 @@
 
 ## Decisions
 
+### 2026-02-09: Add WAL checkpoint/rotation to bound WAL growth
+- Decision: Implement a DB-level `checkpoint` that flushes memtables to SSTs, then rewrites `wal.log` to a compact snapshot (tables + `next_row_id` + embedding state) and safely rotates via `wal.prev` to tolerate interrupted checkpoints.
+- Why: WAL growth is unbounded in the current design; production usage needs a supported way to compact/rotate WAL without losing ID allocation or embedding job state.
+- Evidence:
+  - `crates/embeddb/src/lib.rs` (`checkpoint`, `CheckpointStats`, rotation + recovery fallback, `flush_table_state`)
+  - `crates/embeddb/src/storage/wal.rs` (`WalRecord::SetNextRowId`, `Wal::create_new`, `Wal::sync`)
+  - `crates/embeddb-cli/src/main.rs` (`checkpoint`)
+  - `crates/embeddb-server/src/main.rs` (`POST /checkpoint` + contract/smoke coverage)
+  - Tests: `tests::checkpoint_truncates_wal_and_preserves_next_row_id`, `tests::checkpoint_preserves_embedding_meta_and_vectors`, `tests::open_recovers_from_interrupted_checkpoint_wal_rotation`
+  - Smoke: `bash scripts/http_process_smoke.sh` (now includes `/checkpoint`)
+- Commit: `125b5a5b8f87b52f59863d278f5edf9528b7c022`
+- Confidence: high
+- Trust label: verified-local-smoke
+- Follow-ups:
+  - Add opt-in automatic checkpointing when `wal_bytes` crosses a threshold (config + CLI/HTTP override).
+  - Consider persisting embedding vectors/meta outside WAL to further reduce checkpoint size.
+
 ### 2026-02-09: Add bounded background embedding retries/backoff (persisted in WAL)
 - Decision: Track per-row embedding retry metadata (`attempts`, `next_retry_at_ms`) and apply exponential backoff; only mark jobs `failed` after exceeding max attempts.
 - Why: Make background embedding processing more production-safe by avoiding tight failure loops while still converging without manual operator intervention for transient failures.
@@ -88,3 +105,4 @@
 - `bash scripts/http_process_smoke.sh` (pass)
 - `cargo build --workspace` (pass)
 - `make check` (pass)
+- `cargo run -p embeddb-cli -- --data-dir <tmp> checkpoint` (pass)

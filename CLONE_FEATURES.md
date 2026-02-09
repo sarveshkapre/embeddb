@@ -7,10 +7,10 @@
 - Gaps found during codebase exploration
 
 ## Candidate Features To Do
-- [ ] P1: Implement WAL checkpoint/truncation strategy to prevent unbounded WAL growth (with crash-recovery tests).
-  Score: impact high | effort high | strategic fit high | differentiation low | risk med-high | confidence low-med
 - [ ] P1: Add metadata filtering to kNN search (simple `where` on scalar columns: equality + numeric ranges).
   Score: impact high | effort med-high | strategic fit high | differentiation med | risk med | confidence low-med
+- [ ] P1: Add automatic WAL checkpointing when `wal_bytes` crosses a threshold (opt-in config, plus CLI/HTTP override).
+  Score: impact high | effort med | strategic fit high | differentiation low | risk low-med | confidence med
 - [ ] P2: Add lightweight metrics counters (embedding throughput, WAL sync counts, flush/compaction durations) exposed via stats.
   Score: impact med | effort med | strategic fit med | differentiation low | risk low-med | confidence med
 - [ ] P2: Bulk ingest CLI (`ingest-jsonl`/`ingest-csv`) with progress and resumable embedding processing.
@@ -27,6 +27,8 @@
   Score: impact med-high | effort med-high | strategic fit high | differentiation low | risk med | confidence low-med
 
 ## Implemented
+- [x] 2026-02-09: Added DB-level WAL checkpoint that flushes tables and rewrites `wal.log` to a compact snapshot (preserving `next_row_id` and embedding state), exposed via CLI and HTTP.
+  Evidence: `crates/embeddb/src/lib.rs` (`checkpoint`, `CheckpointStats`, WAL rotation + recovery), `crates/embeddb/src/storage/wal.rs` (`WalRecord::SetNextRowId`, `create_new`), `crates/embeddb-cli/src/main.rs` (`checkpoint`), `crates/embeddb-server/src/main.rs` (`POST /checkpoint` + contract/smoke coverage), `scripts/http_process_smoke.sh` (checkpoint call), tests `checkpoint_truncates_wal_and_preserves_next_row_id`, `checkpoint_preserves_embedding_meta_and_vectors`, `open_recovers_from_interrupted_checkpoint_wal_rotation`.
 - [x] 2026-02-09: Added background embedding retry/backoff with bounded metadata (`attempts`, `next_retry_at_ms`) persisted in WAL.
   Evidence: `crates/embeddb/src/schema.rs` (`EmbeddingMeta`), `crates/embeddb/src/storage/wal.rs` (`WalRecord::UpdateEmbeddingStatus`), `crates/embeddb/src/lib.rs` (retry scheduler), tests `tests::embedding_retry_backoff_defers_until_next_retry_time`, `tests::retry_failed_embedding_job_resets_status_and_error`.
 - [x] 2026-02-09: Added DB stats API (`db_stats`, CLI `db-stats`, HTTP `GET /stats`) including WAL size visibility (`wal_bytes`).
@@ -78,6 +80,9 @@
 - Market scan sources (untrusted): sqlite-vector https://github.com/asg017/sqlite-vector
 - Market scan sources (untrusted): Qdrant filtering model https://qdrant.tech/documentation/concepts/filtering/
 - Market scan sources (untrusted): Chroma metadata filtering docs https://docs.trychroma.com/docs/querying-collections/metadata-filtering
+- Market scan (untrusted web): WAL-backed systems generally need checkpoint/truncation hooks; SQLite exposes manual + auto-checkpointing, including truncate mode, to bound log growth.
+- Market scan sources (untrusted): SQLite `wal_checkpoint(TRUNCATE)` + `wal_autocheckpoint` docs https://www.sqlite.org/pragma.html
+- Market scan sources (untrusted): pgvector notes on combining ANN with `WHERE` filtering https://github.com/pgvector/pgvector
 - Gap map: missing: persisted ANN index (HNSW) for larger tables.
 - Gap map: missing: metadata filtering for vector search (at least equality + range on scalar fields).
 - Gap map: weak: observability/ops (metrics, progress, WAL checkpoints).
