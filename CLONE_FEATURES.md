@@ -7,12 +7,23 @@
 - Gaps found during codebase exploration
 
 ## Candidate Features To Do
-- [ ] P1: Add update semantics for rows that already reside in SST files (currently update requires memtable residency).
-- [ ] P1: Add process-level HTTP server smoke in CI (start binary + curl flow), not just in-process router tests.
 - [ ] P2: Re-enable blocking dependency-review once repository security/dependency-graph support is confirmed.
 - [ ] P2: Add metrics counters for embedding throughput, WAL fsync counts, and compaction durations.
+- [ ] P2: Implement background embedding retries/backoff with bounded retry metadata.
+- [ ] P2: Add CI artifact upload for HTTP process-smoke server logs on failure.
+- [ ] P3: Add HNSW v1 index path for large-table search latency reduction.
 
 ## Implemented
+- [x] 2026-02-09: Added SST-aware row visibility for `update_row`, so updates now work after flush/compaction.
+  Evidence: `crates/embeddb/src/lib.rs` (`update_row`, `load_row`, `row_exists`), test `update_row_after_flush_and_compaction`.
+- [x] 2026-02-09: Fixed pending embedding job processing to read rows from memtable or SST and survive reopen.
+  Evidence: `crates/embeddb/src/lib.rs` (`process_pending_jobs`, `load_row`), test `process_pending_jobs_after_flush_and_reopen`.
+- [x] 2026-02-09: Added process-level HTTP smoke script and CI step that starts the real server and drives HTTP endpoints.
+  Evidence: `scripts/http_process_smoke.sh`, `.github/workflows/ci.yml`.
+- [x] 2026-02-09: Improved SST point lookup with binary search and added storage unit coverage.
+  Evidence: `crates/embeddb/src/storage/sst.rs` (`find_entry_binary_search_roundtrip`).
+- [x] 2026-02-09: Added persistent automation memory docs and incident records for reliability regressions.
+  Evidence: `PROJECT_MEMORY.md`, `INCIDENTS.md`.
 - [x] 2026-02-08: Stabilized CI secret scanning by setting `actions/checkout` to `fetch-depth: 0`, fixing `gitleaks` git-range scan failures.
   Evidence: `.github/workflows/ci.yml`
 - [x] 2026-02-08: Made `dependency-review` non-blocking so unsupported repository settings no longer fail the entire CI run.
@@ -33,7 +44,9 @@
 ## Insights
 - `gitleaks` failures were caused by shallow checkout history during commit-range scans, not leaked secrets.
 - JSON schema contract tests alone missed runtime serde behavior; an in-process HTTP smoke test caught a real API mismatch.
-- `delete_row` can target SST-backed rows, but `update_row` currently cannot once a row is flushed.
+- `process_pending_jobs` previously assumed memtable residency; recovery-safe background work needs shared row visibility semantics.
+- Process-level server smoke catches startup/runtime integration risks that router-only tests cannot surface.
+- CI smoke scripts must avoid assuming optional tools (`rg`) exist on GitHub runners; prefer portable shell utilities.
 
 ## Notes
 - This file is maintained by the autonomous clone loop.

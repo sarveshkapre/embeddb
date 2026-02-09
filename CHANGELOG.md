@@ -1,6 +1,12 @@
 # CHANGELOG
 
 ## Unreleased
+- Added SST-aware row visibility helper so `update_row` now works for rows already flushed to SST files.
+- Fixed embedding job processing to read pending rows from memtable or SST, allowing jobs to complete after flush/reopen.
+- Added regression tests for SST-backed updates and post-flush/post-reopen embedding processing.
+- Improved SST point lookup with binary search in `find_entry` plus storage unit coverage.
+- Added process-level HTTP server smoke script (`scripts/http_process_smoke.sh`) and CI coverage.
+- Made the HTTP process smoke script CI-portable by replacing `rg` dependency with `grep`.
 - Stabilized CI `Gitleaks` scanning by fetching full git history in workflow checkout.
 - Made `dependency-review` non-blocking when unsupported by repository settings.
 - Added explicit CI coverage for `embeddb-server` HTTP + contract/smoke tests.

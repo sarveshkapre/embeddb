@@ -6,6 +6,7 @@ Primary writes commit durably first; embedding jobs then run asynchronously with
 
 ## Status
 - MVP in progress. WAL + in-memory tables + embedding jobs + brute-force search + SST flush/L0 compaction implemented.
+- Row updates and embedding job processing now work for rows that have already flushed to SSTs.
 
 ## Key goals
 - Durable primary writes before embedding jobs
@@ -57,6 +58,7 @@ curl -s -X POST http://127.0.0.1:8080/tables/notes/compact
 HTTP contract + route smoke tests:
 ```bash
 cargo test -p embeddb-server --features http,contract-tests
+bash scripts/http_process_smoke.sh
 ```
 
 Full HTTP reference: `docs/HTTP.md`.
