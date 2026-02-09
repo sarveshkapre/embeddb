@@ -2,11 +2,13 @@
 
 ## Unreleased
 - Added DB-level WAL checkpoint (`checkpoint`) that flushes tables and rewrites `wal.log` to a compact snapshot (preserving `next_row_id` and embedding state) to prevent unbounded WAL growth.
+- Added opt-in WAL auto-checkpointing (`wal_autocheckpoint_bytes`) that runs a preflight checkpoint before WAL appends when `wal.log` exceeds a byte threshold.
 - Added background embedding retries with exponential backoff (`attempts` + `next_retry_at_ms`) persisted in WAL; jobs only become `failed` after exceeding max attempts.
 - Added SST-aware row visibility helper so `update_row` now works for rows already flushed to SST files.
 - Fixed embedding job processing to read pending rows from memtable or SST, allowing jobs to complete after flush/reopen.
 - Added regression tests for SST-backed updates and post-flush/post-reopen embedding processing.
 - Improved SST point lookup with binary search in `find_entry` plus storage unit coverage.
+- Added scalar metadata filtering for brute-force kNN search (MVP equality + numeric ranges) exposed via HTTP and CLI.
 - Added process-level HTTP server smoke script (`scripts/http_process_smoke.sh`) and CI coverage.
 - Made the HTTP process smoke script CI-portable by replacing `rg` dependency with `grep`.
 - Upload HTTP process-smoke logs as a CI artifact on failure for easier diagnosis.
