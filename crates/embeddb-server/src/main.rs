@@ -213,6 +213,21 @@ mod contract_tests {
     }
 
     #[test]
+    fn db_stats_response_schema() {
+        let schema = serde_json::json!({
+            "type": "object",
+            "required": ["tables", "wal_bytes"],
+            "properties": {
+                "tables": { "type": "integer", "minimum": 0 },
+                "wal_bytes": { "type": "integer", "minimum": 0 }
+            }
+        });
+        let validator = compile_schema(schema);
+        let ok = serde_json::json!({ "tables": 2, "wal_bytes": 1234 });
+        assert!(validator.is_valid(&ok));
+    }
+
+    #[test]
     fn create_table_response_schema() {
         let schema = serde_json::json!({
             "type": "object",
@@ -557,6 +572,7 @@ fn build_router(state: Arc<AppState>) -> Router {
         .route("/assets/styles.css", get(ui_styles))
         .route("/favicon.svg", get(ui_favicon))
         .route("/health", get(health))
+        .route("/stats", get(db_stats))
         .route("/tables", get(list_tables).post(create_table))
         .route("/tables/:table", get(describe_table))
         .route("/tables/:table/stats", get(table_stats))
@@ -610,6 +626,15 @@ impl IntoResponse for ApiError {
 #[cfg(feature = "http")]
 async fn health() -> impl IntoResponse {
     Json(serde_json::json!({ "status": "ok" }))
+}
+
+#[cfg(feature = "http")]
+async fn db_stats(State(state): State<Arc<AppState>>) -> Result<impl IntoResponse, ApiError> {
+    state
+        .db
+        .db_stats()
+        .map(Json)
+        .map_err(|err| ApiError::bad_request(err.to_string()))
 }
 
 #[cfg(feature = "http")]
@@ -956,6 +981,19 @@ mod http_smoke_tests {
                 Request::builder()
                     .method("GET")
                     .uri("/health")
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(res.status(), StatusCode::OK);
+
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/stats")
                     .body(Body::empty())
                     .expect("request"),
             )

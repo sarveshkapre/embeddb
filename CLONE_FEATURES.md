@@ -7,8 +7,6 @@
 - Gaps found during codebase exploration
 
 ## Candidate Features To Do
-- [ ] P1: Add WAL size visibility (`wal_bytes`) in `table_stats` or a new `db_stats` API for operational awareness.
-  Score: impact med | effort low-med | strategic fit high | differentiation low | risk low | confidence med
 - [ ] P2: Add lightweight metrics counters (embedding throughput, WAL sync counts, compaction durations).
   Score: impact med | effort med | strategic fit med | differentiation low | risk low | confidence med
 - [ ] P2: Implement embedding retry/backoff with bounded metadata (attempt count + next retry time).
@@ -21,6 +19,8 @@
   Score: impact high | effort high | strategic fit high | differentiation med | risk med-high | confidence low
 
 ## Implemented
+- [x] 2026-02-09: Added DB stats API (`db_stats`, CLI `db-stats`, HTTP `GET /stats`) including WAL size visibility (`wal_bytes`).
+  Evidence: `crates/embeddb/src/lib.rs` (`DbStats`, `db_stats`), `crates/embeddb-cli/src/main.rs` (`db-stats`), `crates/embeddb-server/src/main.rs` (`GET /stats`), `docs/HTTP.md`, contract test `db_stats_response_schema`.
 - [x] 2026-02-09: Added `retry-failed` embedding jobs (core + CLI + HTTP) to unblock operators after transient embedder failures.
   Evidence: `crates/embeddb/src/lib.rs` (`retry_failed_jobs`), `crates/embeddb-cli/src/main.rs` (`retry-failed`), `crates/embeddb-server/src/main.rs` (`/tables/:table/jobs/retry-failed`), `docs/HTTP.md`.
 - [x] 2026-02-09: Preserve and upload HTTP process-smoke server logs as CI artifacts on failure.

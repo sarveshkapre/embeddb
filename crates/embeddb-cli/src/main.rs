@@ -23,6 +23,7 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
+    DbStats,
     ListTables,
     DescribeTable {
         table: String,
@@ -134,6 +135,10 @@ fn main() -> Result<()> {
     let db = EmbedDb::open(Config::new(cli.data_dir))?;
 
     match cli.command {
+        Commands::DbStats => {
+            let stats = db.db_stats()?;
+            println!("{}", serde_json::to_string_pretty(&stats)?);
+        }
         Commands::ListTables => {
             let tables = db.list_tables()?;
             for table in tables {

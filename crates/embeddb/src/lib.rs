@@ -79,6 +79,12 @@ pub struct TableStats {
     pub next_row_id: u64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DbStats {
+    pub tables: usize,
+    pub wal_bytes: u64,
+}
+
 #[derive(Debug)]
 struct TableState {
     schema: TableSchema,
@@ -135,6 +141,18 @@ impl EmbedDb {
             _config: config,
             inner: Mutex::new(Inner { wal, state }),
         })
+    }
+
+    pub fn db_stats(&self) -> Result<DbStats> {
+        let tables = {
+            let inner = self.inner.lock().map_err(|_| anyhow!("lock poisoned"))?;
+            inner.state.tables.len()
+        };
+
+        let wal_path = self._config.data_dir.join("wal.log");
+        let wal_bytes = fs::metadata(wal_path).map(|m| m.len()).unwrap_or(0);
+
+        Ok(DbStats { tables, wal_bytes })
     }
 
     pub fn list_tables(&self) -> Result<Vec<String>> {
@@ -933,6 +951,21 @@ mod tests {
 
         let processed = db.process_pending_jobs("notes", &DummyEmbedder).unwrap();
         assert_eq!(processed, 1);
+    }
+
+    #[test]
+    fn db_stats_reports_tables_and_wal_bytes() {
+        let dir = tempdir().unwrap();
+        let db = EmbedDb::open(Config::new(dir.path().to_path_buf())).unwrap();
+        db.create_table(
+            "notes",
+            TableSchema::new(vec![Column::new("title", DataType::String, false)]),
+            None,
+        )
+        .unwrap();
+
+        let stats = db.db_stats().unwrap();
+        assert_eq!(stats.tables, 1);
     }
 
     #[test]

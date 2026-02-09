@@ -30,6 +30,12 @@ The contract tests also validate core response and error shapes, including list/
 curl -s http://127.0.0.1:8080/health
 ```
 
+### DB stats
+`GET /stats`
+```bash
+curl -s http://127.0.0.1:8080/stats
+```
+
 ### List tables
 `GET /tables`
 ```bash
