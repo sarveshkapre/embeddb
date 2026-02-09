@@ -120,10 +120,8 @@ pub fn remove_files(files: &[SstFile]) -> Result<()> {
 
 pub fn find_entry(path: &Path, row_id: u64) -> Result<Option<SstEntry>> {
     let entries = read_sst(path)?;
-    for entry in entries {
-        if entry.row_id == row_id {
-            return Ok(Some(entry));
-        }
+    if let Ok(idx) = entries.binary_search_by_key(&row_id, |entry| entry.row_id) {
+        return Ok(Some(entries[idx].clone()));
     }
     Ok(None)
 }
@@ -134,4 +132,48 @@ pub fn ensure_dir(path: &Path) -> Result<()> {
         return Err(anyhow!("failed to create table dir"));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::schema::{RowData, Value};
+    use std::collections::BTreeMap;
+    use tempfile::tempdir;
+
+    #[test]
+    fn find_entry_binary_search_roundtrip() {
+        let dir = tempdir().unwrap();
+        let table_dir = dir.path().join("table");
+        let mut fields = BTreeMap::new();
+        fields.insert("title".to_string(), Value::String("hello".to_string()));
+        let row = RowData { id: 3, fields };
+        let entries = vec![
+            SstEntry {
+                row_id: 1,
+                row: Some(RowData {
+                    id: 1,
+                    fields: BTreeMap::new(),
+                }),
+            },
+            SstEntry {
+                row_id: 2,
+                row: None,
+            },
+            SstEntry {
+                row_id: 3,
+                row: Some(row.clone()),
+            },
+        ];
+        let path = write_sst(&table_dir, 0, 1, &entries).unwrap();
+
+        let found = find_entry(&path, 3).unwrap().unwrap();
+        let found_row = found.row.unwrap();
+        assert_eq!(found_row.id, row.id);
+        assert_eq!(
+            found_row.fields.get("title"),
+            Some(&Value::String("hello".to_string()))
+        );
+        assert!(find_entry(&path, 4).unwrap().is_none());
+    }
 }

@@ -301,7 +301,7 @@ impl EmbedDb {
                 .tables
                 .get(table)
                 .ok_or_else(|| anyhow!("table not found"))?;
-            if !table_state.rows.contains_key(&row_id) {
+            if !row_exists(table_state, row_id)? {
                 return Err(anyhow!("row not found"));
             }
             table_state.schema.validate_row(&fields)?;
@@ -356,20 +356,7 @@ impl EmbedDb {
                 .tables
                 .get(table)
                 .ok_or_else(|| anyhow!("table not found"))?;
-            if table_state.rows.contains_key(&row_id) {
-                true
-            } else if table_state.tombstones.contains(&row_id) {
-                false
-            } else {
-                let mut found = false;
-                for file in table_state.sst_files.iter().rev() {
-                    if let Some(entry) = sst::find_entry(&file.path, row_id)? {
-                        found = entry.row.is_some();
-                        break;
-                    }
-                }
-                found
-            }
+            row_exists(table_state, row_id)?
         };
         if !exists {
             return Err(anyhow!("row not found"));
@@ -398,20 +385,7 @@ impl EmbedDb {
             .tables
             .get(table)
             .ok_or_else(|| anyhow!("table not found"))?;
-        if let Some(row) = table_state.rows.get(&row_id) {
-            return Ok(Some(row.clone()));
-        }
-        if table_state.tombstones.contains(&row_id) {
-            return Ok(None);
-        }
-
-        for file in table_state.sst_files.iter().rev() {
-            if let Some(entry) = sst::find_entry(&file.path, row_id)? {
-                return Ok(entry.row);
-            }
-        }
-
-        Ok(None)
+        load_row(table_state, row_id)
     }
 
     pub fn list_embedding_jobs(&self, table: &str) -> Result<Vec<EmbeddingJob>> {
@@ -450,16 +424,17 @@ impl EmbedDb {
                 None => return Ok(0),
             };
 
-            table_state
-                .embedding_meta
-                .iter()
-                .filter(|(_, meta)| meta.status == EmbeddingStatus::Pending)
-                .filter_map(|(row_id, _)| {
-                    let fields = table_state.rows.get(row_id)?.fields.clone();
-                    let input = spec.input_string(&fields).ok()?;
-                    Some((*row_id, input))
-                })
-                .collect()
+            let mut jobs = Vec::new();
+            for (row_id, meta) in &table_state.embedding_meta {
+                if meta.status != EmbeddingStatus::Pending {
+                    continue;
+                }
+                if let Some(row) = load_row(table_state, *row_id)? {
+                    let input = spec.input_string(&row.fields)?;
+                    jobs.push((*row_id, input));
+                }
+            }
+            jobs
         };
 
         let mut processed = 0usize;
@@ -638,6 +613,27 @@ impl EmbedDb {
 
 pub trait Embedder: Send + Sync {
     fn embed(&self, input: &str) -> Result<Vec<f32>>;
+}
+
+fn load_row(table_state: &TableState, row_id: u64) -> Result<Option<RowData>> {
+    if let Some(row) = table_state.rows.get(&row_id) {
+        return Ok(Some(row.clone()));
+    }
+    if table_state.tombstones.contains(&row_id) {
+        return Ok(None);
+    }
+
+    for file in table_state.sst_files.iter().rev() {
+        if let Some(entry) = sst::find_entry(&file.path, row_id)? {
+            return Ok(entry.row);
+        }
+    }
+
+    Ok(None)
+}
+
+fn row_exists(table_state: &TableState, row_id: u64) -> Result<bool> {
+    Ok(load_row(table_state, row_id)?.is_some())
 }
 
 fn apply_record(state: &mut DbState, record: WalRecord) -> Result<()> {
@@ -893,5 +889,77 @@ mod tests {
         let reopened_again = EmbedDb::open(Config::new(data_dir)).unwrap();
         let row = reopened_again.get_row("notes", row_id).unwrap();
         assert!(row.is_none());
+    }
+
+    #[test]
+    fn update_row_after_flush_and_compaction() {
+        let dir = tempdir().unwrap();
+        let data_dir = dir.path().to_path_buf();
+        let db = EmbedDb::open(Config::new(data_dir.clone())).unwrap();
+        db.create_table(
+            "notes",
+            TableSchema::new(vec![Column::new("title", DataType::String, false)]),
+            None,
+        )
+        .unwrap();
+
+        let mut first = BTreeMap::new();
+        first.insert("title".to_string(), Value::String("v1".to_string()));
+        let row_id = db.insert_row("notes", first).unwrap();
+        db.flush_table("notes").unwrap();
+
+        let mut second = BTreeMap::new();
+        second.insert("title".to_string(), Value::String("v2".to_string()));
+        db.update_row("notes", row_id, second).unwrap();
+        db.flush_table("notes").unwrap();
+        db.compact_table("notes").unwrap();
+        drop(db);
+
+        let reopened = EmbedDb::open(Config::new(data_dir)).unwrap();
+        let row = reopened.get_row("notes", row_id).unwrap().unwrap();
+        assert_eq!(
+            row.fields.get("title"),
+            Some(&Value::String("v2".to_string()))
+        );
+    }
+
+    #[test]
+    fn process_pending_jobs_after_flush_and_reopen() {
+        let dir = tempdir().unwrap();
+        let data_dir = dir.path().to_path_buf();
+        let schema = TableSchema::new(vec![
+            Column::new("title", DataType::String, false),
+            Column::new("body", DataType::String, false),
+        ]);
+        let embed_spec = EmbeddingSpec::new(vec!["title", "body"]);
+
+        let db = EmbedDb::open(Config::new(data_dir.clone())).unwrap();
+        db.create_table("notes", schema, Some(embed_spec)).unwrap();
+
+        let mut fields = BTreeMap::new();
+        fields.insert("title".to_string(), Value::String("Hello".to_string()));
+        fields.insert("body".to_string(), Value::String("World".to_string()));
+        let row_id = db.insert_row("notes", fields).unwrap();
+        db.flush_table("notes").unwrap();
+        drop(db);
+
+        let reopened = EmbedDb::open(Config::new(data_dir)).unwrap();
+        let jobs = reopened.list_embedding_jobs("notes").unwrap();
+        assert_eq!(jobs.len(), 1);
+        assert_eq!(jobs[0].status, EmbeddingStatus::Pending);
+
+        let processed = reopened
+            .process_pending_jobs("notes", &DummyEmbedder)
+            .unwrap();
+        assert_eq!(processed, 1);
+
+        let jobs = reopened.list_embedding_jobs("notes").unwrap();
+        assert_eq!(jobs[0].status, EmbeddingStatus::Ready);
+
+        let hits = reopened
+            .search_knn("notes", &[11.0], 1, DistanceMetric::L2)
+            .unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].row_id, row_id);
     }
 }
