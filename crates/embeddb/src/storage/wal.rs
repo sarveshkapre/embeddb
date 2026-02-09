@@ -35,6 +35,11 @@ pub enum WalRecord {
         row_id: u64,
         status: EmbeddingStatus,
         last_error: Option<String>,
+        // Backward-compatible optional metadata for retry/backoff.
+        #[serde(default)]
+        attempts: Option<u32>,
+        #[serde(default)]
+        next_retry_at_ms: Option<u64>,
     },
     StoreEmbedding {
         table: String,

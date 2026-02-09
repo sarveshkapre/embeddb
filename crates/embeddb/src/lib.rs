@@ -10,6 +10,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Mutex;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, Result};
 use schema::EmbeddingMeta;
@@ -19,6 +20,28 @@ use storage::wal::{Wal, WalRecord};
 use vector::{distance, SearchResult};
 
 pub use schema::{Column, DataType, EmbeddingSpec, RowData, TableSchema, Value};
+
+const EMBEDDING_MAX_ATTEMPTS: u32 = 5;
+const EMBEDDING_BACKOFF_BASE_MS: u64 = 250;
+const EMBEDDING_BACKOFF_CAP_MS: u64 = 30_000;
+
+fn now_epoch_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+fn embedding_backoff_ms(attempts: u32) -> u64 {
+    if attempts <= 1 {
+        return EMBEDDING_BACKOFF_BASE_MS;
+    }
+    let exp = attempts.saturating_sub(1).min(20);
+    let mult = 1u64.checked_shl(exp).unwrap_or(u64::MAX);
+    EMBEDDING_BACKOFF_BASE_MS
+        .saturating_mul(mult)
+        .min(EMBEDDING_BACKOFF_CAP_MS)
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -298,6 +321,8 @@ impl EmbedDb {
                         status: EmbeddingStatus::Pending,
                         content_hash,
                         last_error: None,
+                        attempts: 0,
+                        next_retry_at_ms: 0,
                     },
                 );
             }
@@ -358,6 +383,8 @@ impl EmbedDb {
                         status: EmbeddingStatus::Pending,
                         content_hash,
                         last_error: None,
+                        attempts: 0,
+                        next_retry_at_ms: 0,
                     },
                 );
             }
@@ -464,6 +491,8 @@ impl EmbedDb {
                 row_id: id,
                 status: EmbeddingStatus::Pending,
                 last_error: None,
+                attempts: Some(0),
+                next_retry_at_ms: Some(0),
             };
             inner.wal.append(&status_record, true)?;
 
@@ -471,6 +500,8 @@ impl EmbedDb {
                 if let Some(meta) = table_state.embedding_meta.get_mut(&id) {
                     meta.status = EmbeddingStatus::Pending;
                     meta.last_error = None;
+                    meta.attempts = 0;
+                    meta.next_retry_at_ms = 0;
                 }
             }
 
@@ -499,6 +530,16 @@ impl EmbedDb {
         embedder: &dyn Embedder,
         limit: Option<usize>,
     ) -> Result<usize> {
+        self.process_pending_jobs_internal_at(table, embedder, limit, now_epoch_ms())
+    }
+
+    fn process_pending_jobs_internal_at(
+        &self,
+        table: &str,
+        embedder: &dyn Embedder,
+        limit: Option<usize>,
+        now_ms: u64,
+    ) -> Result<usize> {
         let pending_jobs: Vec<(u64, String)> = {
             let inner = self.inner.lock().map_err(|_| anyhow!("lock poisoned"))?;
             let table_state = inner
@@ -518,7 +559,7 @@ impl EmbedDb {
                 .embedding_meta
                 .iter()
                 .filter_map(|(row_id, meta)| {
-                    if meta.status == EmbeddingStatus::Pending {
+                    if meta.status == EmbeddingStatus::Pending && meta.next_retry_at_ms <= now_ms {
                         Some(*row_id)
                     } else {
                         None
@@ -560,6 +601,8 @@ impl EmbedDb {
                         row_id,
                         status: EmbeddingStatus::Ready,
                         last_error: None,
+                        attempts: Some(0),
+                        next_retry_at_ms: Some(0),
                     };
                     inner.wal.append(&status_record, true)?;
 
@@ -567,23 +610,56 @@ impl EmbedDb {
                         if let Some(meta) = table_state.embedding_meta.get_mut(&row_id) {
                             meta.status = EmbeddingStatus::Ready;
                             meta.last_error = None;
+                            meta.attempts = 0;
+                            meta.next_retry_at_ms = 0;
                         }
                     }
                 }
                 Err(err) => {
                     let mut inner = self.inner.lock().map_err(|_| anyhow!("lock poisoned"))?;
+                    let (new_attempts, next_retry, new_status) =
+                        if let Some(table_state) = inner.state.tables.get(table) {
+                            if let Some(meta) = table_state.embedding_meta.get(&row_id) {
+                                let attempts = meta.attempts.saturating_add(1);
+                                if attempts >= EMBEDDING_MAX_ATTEMPTS {
+                                    (attempts, 0u64, EmbeddingStatus::Failed)
+                                } else {
+                                    (
+                                        attempts,
+                                        now_ms.saturating_add(embedding_backoff_ms(attempts)),
+                                        EmbeddingStatus::Pending,
+                                    )
+                                }
+                            } else {
+                                (
+                                    1u32,
+                                    now_ms.saturating_add(embedding_backoff_ms(1)),
+                                    EmbeddingStatus::Pending,
+                                )
+                            }
+                        } else {
+                            (
+                                1u32,
+                                now_ms.saturating_add(embedding_backoff_ms(1)),
+                                EmbeddingStatus::Pending,
+                            )
+                        };
                     let status_record = WalRecord::UpdateEmbeddingStatus {
                         table: table.to_string(),
                         row_id,
-                        status: EmbeddingStatus::Failed,
+                        status: new_status,
                         last_error: Some(err.to_string()),
+                        attempts: Some(new_attempts),
+                        next_retry_at_ms: Some(next_retry),
                     };
                     inner.wal.append(&status_record, true)?;
 
                     if let Some(table_state) = inner.state.tables.get_mut(table) {
                         if let Some(meta) = table_state.embedding_meta.get_mut(&row_id) {
-                            meta.status = EmbeddingStatus::Failed;
+                            meta.status = new_status;
                             meta.last_error = Some(err.to_string());
+                            meta.attempts = new_attempts;
+                            meta.next_retry_at_ms = next_retry;
                         }
                     }
                 }
@@ -789,6 +865,8 @@ fn apply_record(state: &mut DbState, record: WalRecord) -> Result<()> {
                         status: EmbeddingStatus::Pending,
                         content_hash,
                         last_error: None,
+                        attempts: 0,
+                        next_retry_at_ms: 0,
                     },
                 );
             }
@@ -798,11 +876,19 @@ fn apply_record(state: &mut DbState, record: WalRecord) -> Result<()> {
             row_id,
             status,
             last_error,
+            attempts,
+            next_retry_at_ms,
         } => {
             if let Some(table_state) = state.tables.get_mut(&table) {
                 if let Some(meta) = table_state.embedding_meta.get_mut(&row_id) {
                     meta.status = status;
                     meta.last_error = last_error;
+                    if let Some(attempts) = attempts {
+                        meta.attempts = attempts;
+                    }
+                    if let Some(next_retry_at_ms) = next_retry_at_ms {
+                        meta.next_retry_at_ms = next_retry_at_ms;
+                    }
                 }
             }
         }
@@ -888,8 +974,36 @@ mod tests {
 
         let row_id = db.insert_row("notes", fields).unwrap();
 
+        // Drive the job to terminal failure by repeatedly processing it after its backoff expires.
+        let mut now_ms = 1_000_000u64;
+        for attempt in 1..EMBEDDING_MAX_ATTEMPTS {
+            let processed = db
+                .process_pending_jobs_internal_at("notes", &AlwaysFailEmbedder, None, now_ms)
+                .unwrap();
+            assert_eq!(processed, 1);
+
+            let jobs = db.list_embedding_jobs("notes").unwrap();
+            assert_eq!(jobs.len(), 1);
+            assert_eq!(jobs[0].row_id, row_id);
+            assert_eq!(jobs[0].status, EmbeddingStatus::Pending);
+            assert_eq!(jobs[0].last_error.as_deref(), Some("boom"));
+
+            let inner = db.inner.lock().unwrap();
+            let meta = inner
+                .state
+                .tables
+                .get("notes")
+                .unwrap()
+                .embedding_meta
+                .get(&row_id)
+                .unwrap();
+            assert_eq!(meta.attempts, attempt);
+            assert!(meta.next_retry_at_ms > now_ms);
+            now_ms = meta.next_retry_at_ms;
+        }
+
         let processed = db
-            .process_pending_jobs("notes", &AlwaysFailEmbedder)
+            .process_pending_jobs_internal_at("notes", &AlwaysFailEmbedder, None, now_ms)
             .unwrap();
         assert_eq!(processed, 1);
 
@@ -912,6 +1026,68 @@ mod tests {
         let jobs = db.list_embedding_jobs("notes").unwrap();
         assert_eq!(jobs[0].status, EmbeddingStatus::Ready);
         assert!(jobs[0].last_error.is_none());
+    }
+
+    #[test]
+    fn embedding_retry_backoff_defers_until_next_retry_time() {
+        let dir = tempdir().unwrap();
+        let db = EmbedDb::open(Config::new(dir.path().to_path_buf())).unwrap();
+
+        let schema = TableSchema::new(vec![Column::new("title", DataType::String, false)]);
+        let embed_spec = EmbeddingSpec::new(vec!["title"]);
+        db.create_table("notes", schema, Some(embed_spec)).unwrap();
+
+        let mut fields = BTreeMap::new();
+        fields.insert("title".to_string(), Value::String("Hello".to_string()));
+        let row_id = db.insert_row("notes", fields).unwrap();
+
+        let now_ms = 1_000_000u64;
+        let processed = db
+            .process_pending_jobs_internal_at("notes", &AlwaysFailEmbedder, None, now_ms)
+            .unwrap();
+        assert_eq!(processed, 1);
+
+        let inner = db.inner.lock().unwrap();
+        let meta = inner
+            .state
+            .tables
+            .get("notes")
+            .unwrap()
+            .embedding_meta
+            .get(&row_id)
+            .unwrap()
+            .clone();
+        drop(inner);
+        assert_eq!(meta.attempts, 1);
+        assert!(meta.next_retry_at_ms > now_ms);
+
+        // Too early: should skip.
+        let processed = db
+            .process_pending_jobs_internal_at("notes", &AlwaysFailEmbedder, None, now_ms)
+            .unwrap();
+        assert_eq!(processed, 0);
+
+        // At/after the scheduled time: should attempt again.
+        let processed = db
+            .process_pending_jobs_internal_at(
+                "notes",
+                &AlwaysFailEmbedder,
+                None,
+                meta.next_retry_at_ms,
+            )
+            .unwrap();
+        assert_eq!(processed, 1);
+
+        let inner = db.inner.lock().unwrap();
+        let meta2 = inner
+            .state
+            .tables
+            .get("notes")
+            .unwrap()
+            .embedding_meta
+            .get(&row_id)
+            .unwrap();
+        assert_eq!(meta2.attempts, 2);
     }
 
     #[test]

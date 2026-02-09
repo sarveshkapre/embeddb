@@ -155,4 +155,9 @@ pub struct EmbeddingMeta {
     pub status: EmbeddingStatus,
     pub content_hash: String,
     pub last_error: Option<String>,
+    // Number of consecutive embedding failures since last success/enqueue.
+    pub attempts: u32,
+    // Unix epoch millis when this job is eligible to be retried.
+    // 0 means "retry immediately".
+    pub next_retry_at_ms: u64,
 }
