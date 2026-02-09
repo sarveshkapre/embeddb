@@ -5,7 +5,8 @@ use std::path::PathBuf;
 use anyhow::{anyhow, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 use embeddb::{
-    Column, Config, DistanceMetric, EmbedDb, Embedder, EmbeddingSpec, TableSchema, Value,
+    Column, Config, DistanceMetric, EmbedDb, Embedder, EmbeddingSpec, FilterCondition, FilterOp,
+    TableSchema, Value,
 };
 use serde::Deserialize;
 use tracing_subscriber::EnvFilter;
@@ -16,6 +17,9 @@ use tracing_subscriber::EnvFilter;
 struct Cli {
     #[arg(long, default_value = "./data")]
     data_dir: PathBuf,
+
+    #[arg(long)]
+    wal_autocheckpoint_bytes: Option<u64>,
 
     #[command(subcommand)]
     command: Commands,
@@ -73,6 +77,10 @@ enum Commands {
         k: usize,
         #[arg(long, value_enum, default_value_t = MetricArg::Cosine)]
         metric: MetricArg,
+        /// JSON array of filter conditions.
+        /// Example: `[{"column":"age","op":"Gte","value":21},{"column":"score","op":"Lt","value":0.5}]`
+        #[arg(long)]
+        filter: Option<String>,
     },
     SearchText {
         table: String,
@@ -82,6 +90,10 @@ enum Commands {
         k: usize,
         #[arg(long, value_enum, default_value_t = MetricArg::Cosine)]
         metric: MetricArg,
+        /// JSON array of filter conditions.
+        /// Example: `[{"column":"title","op":"Eq","value":"Hello"}]`
+        #[arg(long)]
+        filter: Option<String>,
     },
     Flush {
         table: String,
@@ -111,6 +123,13 @@ struct SchemaFile {
     columns: Vec<Column>,
 }
 
+#[derive(Debug, Deserialize)]
+struct FilterConditionJson {
+    column: String,
+    op: FilterOp,
+    value: serde_json::Value,
+}
+
 struct LocalHashEmbedder;
 
 impl Embedder for LocalHashEmbedder {
@@ -133,7 +152,11 @@ fn main() -> Result<()> {
         .init();
 
     let cli = Cli::parse();
-    let db = EmbedDb::open(Config::new(cli.data_dir))?;
+    let config = match cli.wal_autocheckpoint_bytes {
+        Some(bytes) => Config::new(cli.data_dir).with_wal_autocheckpoint_bytes(bytes),
+        None => Config::new(cli.data_dir),
+    };
+    let db = EmbedDb::open(config)?;
 
     match cli.command {
         Commands::DbStats => {
@@ -210,9 +233,16 @@ fn main() -> Result<()> {
             query,
             k,
             metric,
+            filter,
         } => {
             let query_vec = parse_vector(&query)?;
-            let hits = db.search_knn(&table, &query_vec, k, metric.into())?;
+            let hits = match filter.as_deref() {
+                Some(raw) => {
+                    let filters = parse_filters(raw)?;
+                    db.search_knn_filtered(&table, &query_vec, k, metric.into(), &filters)?
+                }
+                None => db.search_knn(&table, &query_vec, k, metric.into())?,
+            };
             println!("{}", serde_json::to_string_pretty(&hits)?);
         }
         Commands::SearchText {
@@ -220,10 +250,17 @@ fn main() -> Result<()> {
             query_text,
             k,
             metric,
+            filter,
         } => {
             let embedder = LocalHashEmbedder;
             let query_vec = embedder.embed(&query_text)?;
-            let hits = db.search_knn(&table, &query_vec, k, metric.into())?;
+            let hits = match filter.as_deref() {
+                Some(raw) => {
+                    let filters = parse_filters(raw)?;
+                    db.search_knn_filtered(&table, &query_vec, k, metric.into(), &filters)?
+                }
+                None => db.search_knn(&table, &query_vec, k, metric.into())?,
+            };
             println!("{}", serde_json::to_string_pretty(&hits)?);
         }
         Commands::Flush { table } => {
@@ -284,6 +321,21 @@ fn json_to_value(value: &serde_json::Value) -> Result<Value> {
         }
         serde_json::Value::Object(_) => return Err(anyhow!("nested objects not supported")),
     })
+}
+
+fn parse_filters(input: &str) -> Result<Vec<FilterCondition>> {
+    let raw: Vec<FilterConditionJson> = serde_json::from_str(input)
+        .map_err(|err| anyhow!("filter must be a JSON array of conditions: {err}"))?;
+    let mut out = Vec::with_capacity(raw.len());
+    for cond in raw {
+        let value = json_to_value(&cond.value)?;
+        out.push(FilterCondition {
+            column: cond.column,
+            op: cond.op,
+            value,
+        });
+    }
+    Ok(out)
 }
 
 fn parse_vector(input: &str) -> Result<Vec<f32>> {

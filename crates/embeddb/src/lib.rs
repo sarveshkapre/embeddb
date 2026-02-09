@@ -46,11 +46,21 @@ fn embedding_backoff_ms(attempts: u32) -> u64 {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub data_dir: PathBuf,
+    #[serde(default)]
+    pub wal_autocheckpoint_bytes: Option<u64>,
 }
 
 impl Config {
     pub fn new(data_dir: PathBuf) -> Self {
-        Self { data_dir }
+        Self {
+            data_dir,
+            wal_autocheckpoint_bytes: None,
+        }
+    }
+
+    pub fn with_wal_autocheckpoint_bytes(mut self, bytes: u64) -> Self {
+        self.wal_autocheckpoint_bytes = Some(bytes);
+        self
     }
 }
 
@@ -80,6 +90,23 @@ pub struct EmbeddingJob {
 pub struct SearchHit {
     pub row_id: u64,
     pub distance: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum FilterOp {
+    Eq,
+    Neq,
+    Lt,
+    Lte,
+    Gt,
+    Gte,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FilterCondition {
+    pub column: String,
+    pub op: FilterOp,
+    pub value: Value,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -179,6 +206,23 @@ impl EmbedDb {
         })
     }
 
+    fn preflight_wal_autocheckpoint(&self) -> Result<()> {
+        let threshold = match self._config.wal_autocheckpoint_bytes {
+            Some(bytes) if bytes > 0 => bytes,
+            _ => return Ok(()),
+        };
+
+        let wal_path = self._config.data_dir.join("wal.log");
+        let wal_bytes = fs::metadata(&wal_path).map(|m| m.len()).unwrap_or(0);
+        if wal_bytes >= threshold {
+            // Preflight checkpoint before the caller appends additional WAL records, so an
+            // auto-checkpoint failure does not occur after a successful write.
+            let _ = self.checkpoint()?;
+        }
+
+        Ok(())
+    }
+
     pub fn db_stats(&self) -> Result<DbStats> {
         let tables = {
             let inner = self.inner.lock().map_err(|_| anyhow!("lock poisoned"))?;
@@ -250,6 +294,7 @@ impl EmbedDb {
         schema: TableSchema,
         embedding_spec: Option<EmbeddingSpec>,
     ) -> Result<()> {
+        self.preflight_wal_autocheckpoint()?;
         let name = name.into();
         let mut inner = self.inner.lock().map_err(|_| anyhow!("lock poisoned"))?;
         if inner.state.tables.contains_key(&name) {
@@ -286,6 +331,7 @@ impl EmbedDb {
     }
 
     pub fn insert_row(&self, table: &str, fields: BTreeMap<String, Value>) -> Result<u64> {
+        self.preflight_wal_autocheckpoint()?;
         let mut inner = self.inner.lock().map_err(|_| anyhow!("lock poisoned"))?;
         let (row_id, embedding_spec) = {
             let table_state = inner
@@ -350,6 +396,7 @@ impl EmbedDb {
         row_id: u64,
         fields: BTreeMap<String, Value>,
     ) -> Result<()> {
+        self.preflight_wal_autocheckpoint()?;
         let mut inner = self.inner.lock().map_err(|_| anyhow!("lock poisoned"))?;
         let embedding_spec = {
             let table_state = inner
@@ -407,6 +454,7 @@ impl EmbedDb {
     }
 
     pub fn delete_row(&self, table: &str, row_id: u64) -> Result<()> {
+        self.preflight_wal_autocheckpoint()?;
         let mut inner = self.inner.lock().map_err(|_| anyhow!("lock poisoned"))?;
         let exists = {
             let table_state = inner
@@ -471,6 +519,7 @@ impl EmbedDb {
     }
 
     pub fn retry_failed_jobs(&self, table: &str, row_id: Option<u64>) -> Result<usize> {
+        self.preflight_wal_autocheckpoint()?;
         let to_retry: Vec<u64> = {
             let inner = self.inner.lock().map_err(|_| anyhow!("lock poisoned"))?;
             let table_state = inner
@@ -553,6 +602,7 @@ impl EmbedDb {
         limit: Option<usize>,
         now_ms: u64,
     ) -> Result<usize> {
+        self.preflight_wal_autocheckpoint()?;
         let pending_jobs: Vec<(u64, String)> = {
             let inner = self.inner.lock().map_err(|_| anyhow!("lock poisoned"))?;
             let table_state = inner
@@ -705,6 +755,61 @@ impl EmbedDb {
                     continue;
                 }
             }
+            let dist = distance(query, vector, metric);
+            results.push(SearchResult {
+                row_id: *row_id,
+                distance: dist,
+            });
+        }
+
+        results.sort_by(|a, b| a.distance.total_cmp(&b.distance));
+        let hits = results
+            .into_iter()
+            .take(k)
+            .map(|res| SearchHit {
+                row_id: res.row_id,
+                distance: res.distance,
+            })
+            .collect();
+
+        Ok(hits)
+    }
+
+    pub fn search_knn_filtered(
+        &self,
+        table: &str,
+        query: &[f32],
+        k: usize,
+        metric: DistanceMetric,
+        filters: &[FilterCondition],
+    ) -> Result<Vec<SearchHit>> {
+        let inner = self.inner.lock().map_err(|_| anyhow!("lock poisoned"))?;
+        let table_state = inner
+            .state
+            .tables
+            .get(table)
+            .ok_or_else(|| anyhow!("table not found"))?;
+
+        validate_filters(&table_state.schema, filters)?;
+
+        let mut results: Vec<SearchResult> = Vec::new();
+        for (row_id, vector) in &table_state.embeddings {
+            if let Some(meta) = table_state.embedding_meta.get(row_id) {
+                if meta.status != EmbeddingStatus::Ready {
+                    continue;
+                }
+            }
+
+            if !filters.is_empty() {
+                let row = match load_row(table_state, *row_id)? {
+                    Some(row) => row,
+                    None => continue,
+                };
+                if !row_matches_filters(&row, filters) {
+                    continue;
+                }
+            }
+
             let dist = distance(query, vector, metric);
             results.push(SearchResult {
                 row_id: *row_id,
@@ -883,6 +988,112 @@ fn load_row(table_state: &TableState, row_id: u64) -> Result<Option<RowData>> {
 
 fn row_exists(table_state: &TableState, row_id: u64) -> Result<bool> {
     Ok(load_row(table_state, row_id)?.is_some())
+}
+
+fn value_as_f64(value: &Value) -> Option<f64> {
+    match value {
+        Value::Int(v) => Some(*v as f64),
+        Value::Float(v) => Some(*v),
+        _ => None,
+    }
+}
+
+fn validate_filters(schema: &TableSchema, filters: &[FilterCondition]) -> Result<()> {
+    if filters.is_empty() {
+        return Ok(());
+    }
+
+    for filter in filters {
+        let col = schema
+            .columns
+            .iter()
+            .find(|col| col.name == filter.column)
+            .ok_or_else(|| anyhow!("unknown filter column '{}'", filter.column))?;
+
+        let value = &filter.value;
+        let is_numeric = matches!(col.data_type, DataType::Int | DataType::Float);
+        let value_is_numeric = value_as_f64(value).is_some();
+
+        match filter.op {
+            FilterOp::Eq | FilterOp::Neq => {
+                if value == &Value::Null {
+                    continue;
+                }
+                if is_numeric && value_is_numeric {
+                    continue;
+                }
+                if !value.matches(&col.data_type) {
+                    return Err(anyhow!(
+                        "filter column '{}' type mismatch (expected {:?})",
+                        filter.column,
+                        col.data_type
+                    ));
+                }
+            }
+            FilterOp::Lt | FilterOp::Lte | FilterOp::Gt | FilterOp::Gte => {
+                if !is_numeric {
+                    return Err(anyhow!(
+                        "filter op '{:?}' not supported for non-numeric column '{}'",
+                        filter.op,
+                        filter.column
+                    ));
+                }
+                if !value_is_numeric {
+                    return Err(anyhow!(
+                        "filter op '{:?}' requires numeric value for column '{}'",
+                        filter.op,
+                        filter.column
+                    ));
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn row_matches_filters(row: &RowData, filters: &[FilterCondition]) -> bool {
+    for filter in filters {
+        let actual = row.fields.get(&filter.column).unwrap_or(&Value::Null);
+        let expected = &filter.value;
+        let matches = match filter.op {
+            FilterOp::Eq => {
+                if let (Some(a), Some(b)) = (value_as_f64(actual), value_as_f64(expected)) {
+                    a == b
+                } else {
+                    actual == expected
+                }
+            }
+            FilterOp::Neq => {
+                if let (Some(a), Some(b)) = (value_as_f64(actual), value_as_f64(expected)) {
+                    a != b
+                } else {
+                    actual != expected
+                }
+            }
+            FilterOp::Lt => value_as_f64(actual)
+                .zip(value_as_f64(expected))
+                .map(|(a, b)| a < b)
+                .unwrap_or(false),
+            FilterOp::Lte => value_as_f64(actual)
+                .zip(value_as_f64(expected))
+                .map(|(a, b)| a <= b)
+                .unwrap_or(false),
+            FilterOp::Gt => value_as_f64(actual)
+                .zip(value_as_f64(expected))
+                .map(|(a, b)| a > b)
+                .unwrap_or(false),
+            FilterOp::Gte => value_as_f64(actual)
+                .zip(value_as_f64(expected))
+                .map(|(a, b)| a >= b)
+                .unwrap_or(false),
+        };
+
+        if !matches {
+            return false;
+        }
+    }
+    true
 }
 
 fn apply_record(state: &mut DbState, record: WalRecord) -> Result<()> {
@@ -1533,6 +1744,92 @@ mod tests {
             .unwrap();
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].row_id, row_id);
+    }
+
+    #[test]
+    fn search_knn_filtered_applies_scalar_filters() {
+        let dir = tempdir().unwrap();
+        let db = EmbedDb::open(Config::new(dir.path().to_path_buf())).unwrap();
+
+        let schema = TableSchema::new(vec![
+            Column::new("title", DataType::String, false),
+            Column::new("score", DataType::Float, false),
+            Column::new("age", DataType::Int, false),
+        ]);
+        let embed_spec = EmbeddingSpec::new(vec!["title"]);
+        db.create_table("notes", schema, Some(embed_spec)).unwrap();
+
+        let mut a = BTreeMap::new();
+        a.insert("title".to_string(), Value::String("Hello".to_string()));
+        a.insert("score".to_string(), Value::Float(0.1));
+        a.insert("age".to_string(), Value::Int(10));
+        let row_a = db.insert_row("notes", a).unwrap();
+
+        let mut b = BTreeMap::new();
+        b.insert("title".to_string(), Value::String("Greetings".to_string()));
+        b.insert("score".to_string(), Value::Float(0.9));
+        b.insert("age".to_string(), Value::Int(99));
+        let row_b = db.insert_row("notes", b).unwrap();
+
+        db.process_pending_jobs("notes", &DummyEmbedder).unwrap();
+
+        let filters = vec![FilterCondition {
+            column: "score".to_string(),
+            op: FilterOp::Lt,
+            value: Value::Float(0.5),
+        }];
+        let hits = db
+            .search_knn_filtered("notes", &[5.0], 10, DistanceMetric::L2, &filters)
+            .unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].row_id, row_a);
+
+        let filters = vec![FilterCondition {
+            column: "age".to_string(),
+            op: FilterOp::Gte,
+            value: Value::Int(50),
+        }];
+        let hits = db
+            .search_knn_filtered("notes", &[5.0], 10, DistanceMetric::L2, &filters)
+            .unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].row_id, row_b);
+
+        let filters = vec![FilterCondition {
+            column: "title".to_string(),
+            op: FilterOp::Eq,
+            value: Value::String("Hello".to_string()),
+        }];
+        let hits = db
+            .search_knn_filtered("notes", &[5.0], 10, DistanceMetric::L2, &filters)
+            .unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].row_id, row_a);
+    }
+
+    #[test]
+    fn wal_autocheckpoint_triggers_before_write() {
+        let dir = tempdir().unwrap();
+        let data_dir = dir.path().to_path_buf();
+        let db = EmbedDb::open(Config::new(data_dir.clone()).with_wal_autocheckpoint_bytes(512))
+            .unwrap();
+        db.create_table(
+            "notes",
+            TableSchema::new(vec![Column::new("title", DataType::String, false)]),
+            None,
+        )
+        .unwrap();
+
+        for i in 0..200u64 {
+            let mut fields = BTreeMap::new();
+            fields.insert("title".to_string(), Value::String(format!("row-{i}")));
+            db.insert_row("notes", fields).unwrap();
+        }
+
+        // Auto-checkpoint flushes tables; ensure we produced SST output without explicitly calling
+        // flush/compact/checkpoint.
+        let stats = db.table_stats("notes").unwrap();
+        assert!(stats.sst_files > 0);
     }
 
     #[test]

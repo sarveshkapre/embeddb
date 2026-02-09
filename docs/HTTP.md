@@ -7,6 +7,11 @@
 cargo run -p embeddb-server --features http
 ```
 
+Optional env vars:
+- `EMBEDDB_ADDR`: bind address (default `127.0.0.1:8080`)
+- `EMBEDDB_DATA_DIR`: data directory (default `./data`)
+- `EMBEDDB_WAL_AUTOCHECKPOINT_BYTES`: when set, the server will auto-run a WAL `POST /checkpoint` *before* handling a write if `wal.log` is at/above this size (bytes).
+
 ## Web Console
 The HTTP server also serves a built-in UI at `http://127.0.0.1:8080`. Use it to create tables,
 insert rows, process embedding jobs, and run text search.
@@ -136,7 +141,11 @@ curl -s -X DELETE http://127.0.0.1:8080/tables/notes/rows/1
 {
   "query": [1.0, 2.0, 3.0, 4.0],
   "k": 5,
-  "metric": "Cosine"
+  "metric": "Cosine",
+  "filter": [
+    { "column": "age", "op": "Gte", "value": 21 },
+    { "column": "score", "op": "Lt", "value": 0.5 }
+  ]
 }
 ```
 ```bash
@@ -146,7 +155,10 @@ curl -s -X POST http://127.0.0.1:8080/tables/notes/search \
 {
   "query": [1.0, 2.0, 3.0, 4.0],
   "k": 5,
-  "metric": "Cosine"
+  "metric": "Cosine",
+  "filter": [
+    { "column": "age", "op": "Gte", "value": 21 }
+  ]
 }
 JSON
 ```
@@ -157,7 +169,10 @@ JSON
 {
   "query_text": "hello world",
   "k": 5,
-  "metric": "Cosine"
+  "metric": "Cosine",
+  "filter": [
+    { "column": "title", "op": "Eq", "value": "Hello" }
+  ]
 }
 ```
 ```bash
@@ -167,7 +182,10 @@ curl -s -X POST http://127.0.0.1:8080/tables/notes/search-text \
 {
   "query_text": "hello world",
   "k": 5,
-  "metric": "Cosine"
+  "metric": "Cosine",
+  "filter": [
+    { "column": "title", "op": "Eq", "value": "Hello" }
+  ]
 }
 JSON
 ```

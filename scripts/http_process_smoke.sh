@@ -64,12 +64,29 @@ curl --silent --show-error --fail \
   -d '{"fields":{"title":"Hello","body":"World"}}' \
   "${BASE_URL}/tables/notes/rows" >/dev/null
 
-curl --silent --show-error --fail -X POST "${BASE_URL}/tables/notes/jobs/process" >/dev/null
-
 curl --silent --show-error --fail \
   -H "content-type: application/json" \
+  -d '{"fields":{"title":"Bye","body":"Moon"}}' \
+  "${BASE_URL}/tables/notes/rows" >/dev/null
+
+curl --silent --show-error --fail -X POST "${BASE_URL}/tables/notes/jobs/process" >/dev/null
+
+SEARCH_ALL="$(curl --silent --show-error --fail \
+  -H "content-type: application/json" \
   -d '{"query_text":"Hello\nWorld","k":1}' \
-  "${BASE_URL}/tables/notes/search-text" >/dev/null
+  "${BASE_URL}/tables/notes/search-text")"
+echo "${SEARCH_ALL}" | grep -q '"row_id":'
+
+SEARCH_FILTERED="$(curl --silent --show-error --fail \
+  -H "content-type: application/json" \
+  -d '{"query_text":"Hello\nWorld","k":5,"filter":[{"column":"title","op":"Eq","value":"Hello"}]}' \
+  "${BASE_URL}/tables/notes/search-text")"
+echo "${SEARCH_FILTERED}" | grep -q '"row_id":1'
+if echo "${SEARCH_FILTERED}" | grep -q '"row_id":2'; then
+  echo "Filtered search unexpectedly returned row_id 2"
+  echo "${SEARCH_FILTERED}"
+  exit 1
+fi
 
 curl --silent --show-error --fail -X POST "${BASE_URL}/tables/notes/flush" >/dev/null
 curl --silent --show-error --fail -X POST "${BASE_URL}/tables/notes/compact" >/dev/null

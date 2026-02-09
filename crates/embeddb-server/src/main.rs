@@ -13,7 +13,10 @@ use std::sync::Arc;
 #[cfg(feature = "http")]
 use anyhow::anyhow;
 #[cfg(feature = "http")]
-use embeddb::{Config, DistanceMetric, EmbedDb, Embedder, EmbeddingSpec, TableSchema, Value};
+use embeddb::{
+    Config, DistanceMetric, EmbedDb, Embedder, EmbeddingSpec, FilterCondition, FilterOp,
+    TableSchema, Value,
+};
 #[cfg(feature = "http")]
 use serde::Deserialize;
 
@@ -108,7 +111,7 @@ mod contract_tests {
                     "type": "object",
                     "minProperties": 1,
                     "additionalProperties": {
-                        "oneOf": [
+                        "anyOf": [
                             { "type": "integer" },
                             { "type": "number" },
                             { "type": "boolean" },
@@ -152,7 +155,28 @@ mod contract_tests {
                     "items": { "type": "number" }
                 },
                 "k": { "type": "integer", "minimum": 1 },
-                "metric": { "type": "string", "enum": ["Cosine", "L2"] }
+                "metric": { "type": "string", "enum": ["Cosine", "L2"] },
+                "filter": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "required": ["column", "op", "value"],
+                        "properties": {
+                            "column": { "type": "string", "minLength": 1 },
+                            "op": { "type": "string", "enum": ["Eq", "Neq", "Lt", "Lte", "Gt", "Gte"] },
+                            "value": {
+                                "anyOf": [
+                                    { "type": "integer" },
+                                    { "type": "number" },
+                                    { "type": "boolean" },
+                                    { "type": "string" },
+                                    { "type": "array", "items": { "type": "integer", "minimum": 0, "maximum": 255 } },
+                                    { "type": "null" }
+                                ]
+                            }
+                        }
+                    }
+                }
             }
         });
 
@@ -164,6 +188,15 @@ mod contract_tests {
             "metric": "Cosine"
         });
         assert!(validator.is_valid(&valid));
+
+        let valid_with_filter = serde_json::json!({
+            "query": [1.0],
+            "filter": [
+                { "column": "age", "op": "Gte", "value": 21 },
+                { "column": "score", "op": "Lt", "value": 0.5 }
+            ]
+        });
+        assert!(validator.is_valid(&valid_with_filter));
 
         let invalid = serde_json::json!({
             "k": 5
@@ -179,7 +212,28 @@ mod contract_tests {
             "properties": {
                 "query_text": { "type": "string", "minLength": 1 },
                 "k": { "type": "integer", "minimum": 1 },
-                "metric": { "type": "string", "enum": ["Cosine", "L2"] }
+                "metric": { "type": "string", "enum": ["Cosine", "L2"] },
+                "filter": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "required": ["column", "op", "value"],
+                        "properties": {
+                            "column": { "type": "string", "minLength": 1 },
+                            "op": { "type": "string", "enum": ["Eq", "Neq", "Lt", "Lte", "Gt", "Gte"] },
+                            "value": {
+                                "anyOf": [
+                                    { "type": "integer" },
+                                    { "type": "number" },
+                                    { "type": "boolean" },
+                                    { "type": "string" },
+                                    { "type": "array", "items": { "type": "integer", "minimum": 0, "maximum": 255 } },
+                                    { "type": "null" }
+                                ]
+                            }
+                        }
+                    }
+                }
             }
         });
 
@@ -191,6 +245,14 @@ mod contract_tests {
             "metric": "L2"
         });
         assert!(validator.is_valid(&valid));
+
+        let valid_with_filter = serde_json::json!({
+            "query_text": "hello world",
+            "filter": [
+                { "column": "title", "op": "Eq", "value": "Hello" }
+            ]
+        });
+        assert!(validator.is_valid(&valid_with_filter));
 
         let invalid = serde_json::json!({
             "query_text": ""
@@ -464,7 +526,7 @@ mod contract_tests {
                 "fields": {
                     "type": "object",
                     "additionalProperties": {
-                        "oneOf": [
+                        "anyOf": [
                             { "type": "integer" },
                             { "type": "number" },
                             { "type": "boolean" },
@@ -556,7 +618,19 @@ fn run_http() -> Result<()> {
     let data_dir =
         PathBuf::from(std::env::var("EMBEDDB_DATA_DIR").unwrap_or_else(|_| "./data".to_string()));
 
-    let db = EmbedDb::open(Config::new(data_dir))?;
+    let wal_autocheckpoint_bytes = std::env::var("EMBEDDB_WAL_AUTOCHECKPOINT_BYTES")
+        .ok()
+        .map(|raw| {
+            raw.parse::<u64>()
+                .map_err(|_| anyhow!("invalid EMBEDDB_WAL_AUTOCHECKPOINT_BYTES"))
+        })
+        .transpose()?;
+
+    let config = match wal_autocheckpoint_bytes {
+        Some(bytes) => Config::new(data_dir).with_wal_autocheckpoint_bytes(bytes),
+        None => Config::new(data_dir),
+    };
+    let db = EmbedDb::open(config)?;
     let state = Arc::new(AppState { db });
     let app = build_router(state);
 
@@ -826,10 +900,33 @@ async fn delete_row(
 
 #[cfg(feature = "http")]
 #[derive(Debug, Deserialize)]
+struct FilterConditionJson {
+    column: String,
+    op: FilterOp,
+    value: serde_json::Value,
+}
+
+#[cfg(feature = "http")]
+fn parse_filters(raw: Vec<FilterConditionJson>) -> Result<Vec<FilterCondition>> {
+    let mut out = Vec::with_capacity(raw.len());
+    for cond in raw {
+        let value = json_value_to_embeddb(cond.value)?;
+        out.push(FilterCondition {
+            column: cond.column,
+            op: cond.op,
+            value,
+        });
+    }
+    Ok(out)
+}
+
+#[cfg(feature = "http")]
+#[derive(Debug, Deserialize)]
 struct SearchRequest {
     query: Vec<f32>,
     k: Option<usize>,
     metric: Option<DistanceMetric>,
+    filter: Option<Vec<FilterConditionJson>>,
 }
 
 #[cfg(feature = "http")]
@@ -840,9 +937,20 @@ async fn search(
 ) -> Result<impl IntoResponse, ApiError> {
     let k = req.k.unwrap_or(5);
     let metric = req.metric.unwrap_or(DistanceMetric::Cosine);
+    let filters = req
+        .filter
+        .map(parse_filters)
+        .transpose()
+        .map_err(|err| ApiError::bad_request(err.to_string()))?;
     state
         .db
-        .search_knn(&table, &req.query, k, metric)
+        .search_knn_filtered(
+            &table,
+            &req.query,
+            k,
+            metric,
+            filters.as_deref().unwrap_or(&[]),
+        )
         .map(Json)
         .map_err(|err| ApiError::bad_request(err.to_string()))
 }
@@ -853,6 +961,7 @@ struct SearchTextRequest {
     query_text: String,
     k: Option<usize>,
     metric: Option<DistanceMetric>,
+    filter: Option<Vec<FilterConditionJson>>,
 }
 
 #[cfg(feature = "http")]
@@ -867,9 +976,14 @@ async fn search_text(
     let query = embedder
         .embed(&req.query_text)
         .map_err(|err| ApiError::bad_request(err.to_string()))?;
+    let filters = req
+        .filter
+        .map(parse_filters)
+        .transpose()
+        .map_err(|err| ApiError::bad_request(err.to_string()))?;
     state
         .db
-        .search_knn(&table, &query, k, metric)
+        .search_knn_filtered(&table, &query, k, metric, filters.as_deref().unwrap_or(&[]))
         .map(Json)
         .map_err(|err| ApiError::bad_request(err.to_string()))
 }

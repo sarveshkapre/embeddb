@@ -45,6 +45,9 @@ cargo run -p embeddb-server --features http
 
 # Override address/data dir
 EMBEDDB_ADDR=127.0.0.1:9090 EMBEDDB_DATA_DIR=./data cargo run -p embeddb-server --features http
+
+# Optional: auto-run WAL checkpoint before writes when WAL grows above a threshold (bytes)
+EMBEDDB_WAL_AUTOCHECKPOINT_BYTES=50000000 cargo run -p embeddb-server --features http
 ```
 
 ## Web Console
@@ -56,6 +59,13 @@ creating tables, inserting rows, processing embeddings, and running text search.
 curl -s http://127.0.0.1:8080/health
 curl -s -X POST http://127.0.0.1:8080/tables/notes/flush
 curl -s -X POST http://127.0.0.1:8080/tables/notes/compact
+```
+
+Filtered search (MVP `AND` filters: equality + numeric ranges):
+```bash
+curl -s -X POST http://127.0.0.1:8080/tables/notes/search-text \
+  -H "Content-Type: application/json" \
+  -d '{"query_text":"hello world","k":5,"filter":[{"column":"age","op":"Gte","value":21}]}'
 ```
 
 HTTP contract + route smoke tests:
