@@ -17,6 +17,6 @@
 - Process-level smoke: `bash scripts/http_process_smoke.sh`
 
 ## Next 3 improvements
-1. Implement WAL checkpoint/truncation strategy to prevent unbounded WAL growth.
-2. Add metadata filtering to kNN search (basic equality + numeric range).
+1. Add an exclusive `data_dir` lock to prevent concurrent opens.
+2. Portable snapshot export/restore (copy-only backups for `data_dir`, with safety checks).
 3. Add lightweight metrics counters (embedding throughput/retry rate, WAL fsync counts, compaction durations).

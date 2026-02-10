@@ -9,6 +9,7 @@ mod vector;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs::{self, File, OpenOptions};
 use std::io::ErrorKind;
+use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -141,6 +142,12 @@ pub struct DbStats {
 pub struct CheckpointStats {
     pub wal_bytes_before: u64,
     pub wal_bytes_after: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SnapshotStats {
+    pub files_copied: u64,
+    pub bytes_copied: u64,
 }
 
 #[derive(Debug)]
@@ -896,100 +903,207 @@ impl EmbedDb {
     }
 
     pub fn checkpoint(&self) -> Result<CheckpointStats> {
-        let wal_path = self._config.data_dir.join("wal.log");
-        let wal_prev_path = self._config.data_dir.join("wal.prev");
-        let wal_new_path = self._config.data_dir.join("wal.log.new");
-        let wal_dummy_path = self._config.data_dir.join("wal.checkpoint.tmp");
-
-        let wal_bytes_before = fs::metadata(&wal_path).map(|m| m.len()).unwrap_or(0);
-
         let mut inner = self.inner.lock().map_err(|_| anyhow!("lock poisoned"))?;
+        checkpoint_locked(&self._config.data_dir, &mut inner)
+    }
 
-        // Flush all tables so row data is durably in SSTs and the checkpoint WAL can be compact.
-        let table_names: Vec<String> = inner.state.tables.keys().cloned().collect();
-        for table in table_names {
-            let table_state = inner
-                .state
-                .tables
-                .get_mut(&table)
-                .ok_or_else(|| anyhow!("table not found"))?;
-            flush_table_state(&self._config.data_dir, &table, table_state)?;
+    pub fn export_snapshot(&self, dest_dir: impl AsRef<Path>) -> Result<SnapshotStats> {
+        let dest_dir = dest_dir.as_ref();
+        ensure_empty_or_missing_dir(dest_dir)?;
+
+        // Hold the DB lock for the entire operation so the snapshot is a consistent copy.
+        let mut inner = self.inner.lock().map_err(|_| anyhow!("lock poisoned"))?;
+        let _ = checkpoint_locked(&self._config.data_dir, &mut inner)?;
+        let (files_copied, bytes_copied) = copy_dir_recursive_filtered(
+            &self._config.data_dir,
+            dest_dir,
+            should_skip_snapshot_entry,
+        )?;
+
+        Ok(SnapshotStats {
+            files_copied,
+            bytes_copied,
+        })
+    }
+
+    pub fn restore_snapshot(
+        snapshot_dir: impl AsRef<Path>,
+        data_dir: impl AsRef<Path>,
+    ) -> Result<SnapshotStats> {
+        let snapshot_dir = snapshot_dir.as_ref();
+        let data_dir = data_dir.as_ref();
+
+        if !snapshot_dir.exists() {
+            return Err(anyhow!(
+                "snapshot dir does not exist: {}",
+                snapshot_dir.display()
+            ));
         }
+        ensure_empty_or_missing_dir(data_dir)?;
 
-        let mut records: Vec<WalRecord> = Vec::new();
-        for (name, table_state) in inner.state.tables.iter() {
-            records.push(WalRecord::CreateTable {
-                name: name.clone(),
-                schema: table_state.schema.clone(),
-                embedding_spec: table_state.embedding_spec.clone(),
-            });
-            records.push(WalRecord::SetNextRowId {
-                table: name.clone(),
-                next_row_id: table_state.next_row_id,
-            });
-
-            for (row_id, meta) in &table_state.embedding_meta {
-                records.push(WalRecord::EnqueueEmbedding {
-                    table: name.clone(),
-                    row_id: *row_id,
-                    content_hash: meta.content_hash.clone(),
-                });
-                records.push(WalRecord::UpdateEmbeddingStatus {
-                    table: name.clone(),
-                    row_id: *row_id,
-                    status: meta.status,
-                    last_error: meta.last_error.clone(),
-                    attempts: Some(meta.attempts),
-                    next_retry_at_ms: Some(meta.next_retry_at_ms),
-                });
-            }
-
-            for (row_id, vector) in &table_state.embeddings {
-                records.push(WalRecord::StoreEmbedding {
-                    table: name.clone(),
-                    row_id: *row_id,
-                    vector: vector.clone(),
-                });
-            }
-        }
-
-        // Write the new WAL snapshot.
-        {
-            let mut new_wal = Wal::create_new(wal_new_path.clone())?;
-            for record in &records {
-                new_wal.append(record, false)?;
-            }
-            new_wal.sync()?;
-        }
-
-        // Ensure `wal.log` is closed during rotation (important for Windows semantics).
-        inner.wal = Wal::create_new(wal_dummy_path.clone())?;
-
-        // Rotate with a `wal.prev` fallback to tolerate crashes between renames.
-        if wal_prev_path.exists() {
-            let _ = fs::remove_file(&wal_prev_path);
-        }
-        if wal_path.exists() {
-            fs::rename(&wal_path, &wal_prev_path)?;
-        }
-        fs::rename(&wal_new_path, &wal_path)?;
-
-        let wal_bytes_after = fs::metadata(&wal_path).map(|m| m.len()).unwrap_or(0);
-
-        inner.wal = Wal::open(wal_path)?;
-
-        let _ = fs::remove_file(&wal_dummy_path);
-        let _ = fs::remove_file(&wal_prev_path);
-
-        Ok(CheckpointStats {
-            wal_bytes_before,
-            wal_bytes_after,
+        let (files_copied, bytes_copied) =
+            copy_dir_recursive_filtered(snapshot_dir, data_dir, should_skip_snapshot_entry)?;
+        Ok(SnapshotStats {
+            files_copied,
+            bytes_copied,
         })
     }
 }
 
 pub trait Embedder: Send + Sync {
     fn embed(&self, input: &str) -> Result<Vec<f32>>;
+}
+
+fn checkpoint_locked(data_dir: &Path, inner: &mut Inner) -> Result<CheckpointStats> {
+    let wal_path = data_dir.join("wal.log");
+    let wal_prev_path = data_dir.join("wal.prev");
+    let wal_new_path = data_dir.join("wal.log.new");
+    let wal_dummy_path = data_dir.join("wal.checkpoint.tmp");
+
+    let wal_bytes_before = fs::metadata(&wal_path).map(|m| m.len()).unwrap_or(0);
+
+    // Flush all tables so row data is durably in SSTs and the checkpoint WAL can be compact.
+    let table_names: Vec<String> = inner.state.tables.keys().cloned().collect();
+    for table in table_names {
+        let table_state = inner
+            .state
+            .tables
+            .get_mut(&table)
+            .ok_or_else(|| anyhow!("table not found"))?;
+        flush_table_state(data_dir, &table, table_state)?;
+    }
+
+    let mut records: Vec<WalRecord> = Vec::new();
+    for (name, table_state) in inner.state.tables.iter() {
+        records.push(WalRecord::CreateTable {
+            name: name.clone(),
+            schema: table_state.schema.clone(),
+            embedding_spec: table_state.embedding_spec.clone(),
+        });
+        records.push(WalRecord::SetNextRowId {
+            table: name.clone(),
+            next_row_id: table_state.next_row_id,
+        });
+
+        for (row_id, meta) in &table_state.embedding_meta {
+            records.push(WalRecord::EnqueueEmbedding {
+                table: name.clone(),
+                row_id: *row_id,
+                content_hash: meta.content_hash.clone(),
+            });
+            records.push(WalRecord::UpdateEmbeddingStatus {
+                table: name.clone(),
+                row_id: *row_id,
+                status: meta.status,
+                last_error: meta.last_error.clone(),
+                attempts: Some(meta.attempts),
+                next_retry_at_ms: Some(meta.next_retry_at_ms),
+            });
+        }
+
+        for (row_id, vector) in &table_state.embeddings {
+            records.push(WalRecord::StoreEmbedding {
+                table: name.clone(),
+                row_id: *row_id,
+                vector: vector.clone(),
+            });
+        }
+    }
+
+    // Write the new WAL snapshot.
+    {
+        let mut new_wal = Wal::create_new(wal_new_path.clone())?;
+        for record in &records {
+            new_wal.append(record, false)?;
+        }
+        new_wal.sync()?;
+    }
+
+    // Ensure `wal.log` is closed during rotation (important for Windows semantics).
+    inner.wal = Wal::create_new(wal_dummy_path.clone())?;
+
+    // Rotate with a `wal.prev` fallback to tolerate crashes between renames.
+    if wal_prev_path.exists() {
+        let _ = fs::remove_file(&wal_prev_path);
+    }
+    if wal_path.exists() {
+        fs::rename(&wal_path, &wal_prev_path)?;
+    }
+    fs::rename(&wal_new_path, &wal_path)?;
+
+    let wal_bytes_after = fs::metadata(&wal_path).map(|m| m.len()).unwrap_or(0);
+
+    inner.wal = Wal::open(wal_path)?;
+
+    let _ = fs::remove_file(&wal_dummy_path);
+    let _ = fs::remove_file(&wal_prev_path);
+
+    Ok(CheckpointStats {
+        wal_bytes_before,
+        wal_bytes_after,
+    })
+}
+
+fn ensure_empty_or_missing_dir(path: &Path) -> Result<()> {
+    if path.exists() {
+        if !path.is_dir() {
+            return Err(anyhow!(
+                "path exists and is not a directory: {}",
+                path.display()
+            ));
+        }
+        if fs::read_dir(path)?.next().is_some() {
+            return Err(anyhow!("directory must be empty: {}", path.display()));
+        }
+        return Ok(());
+    }
+
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    Ok(())
+}
+
+fn should_skip_snapshot_entry(path: &Path) -> bool {
+    match path.file_name().and_then(|s| s.to_str()) {
+        // Transient/lock files should not be snapshotted.
+        Some("embeddb.lock" | "wal.prev" | "wal.log.new" | "wal.checkpoint.tmp") => true,
+        _ => false,
+    }
+}
+
+fn copy_dir_recursive_filtered(
+    src: &Path,
+    dst: &Path,
+    should_skip: fn(&Path) -> bool,
+) -> Result<(u64, u64)> {
+    fs::create_dir_all(dst)?;
+
+    let mut files_copied = 0u64;
+    let mut bytes_copied = 0u64;
+
+    for entry in fs::read_dir(src)? {
+        let entry = entry?;
+        let path = entry.path();
+        if should_skip(&path) {
+            continue;
+        }
+        let dst_path = dst.join(entry.file_name());
+        let ty = entry.file_type()?;
+        if ty.is_dir() {
+            let (f, b) = copy_dir_recursive_filtered(&path, &dst_path, should_skip)?;
+            files_copied += f;
+            bytes_copied += b;
+        } else if ty.is_file() {
+            let bytes = fs::copy(&path, &dst_path)?;
+            files_copied += 1;
+            bytes_copied += bytes;
+        } else {
+            return Err(anyhow!("unsupported dir entry type: {}", path.display()));
+        }
+    }
+
+    Ok((files_copied, bytes_copied))
 }
 
 fn load_row(table_state: &TableState, row_id: u64) -> Result<Option<RowData>> {
@@ -1876,6 +1990,36 @@ mod tests {
 
         let db = EmbedDb::open(config).unwrap();
         let row = db.get_row("notes", 1).unwrap().unwrap();
+        assert_eq!(
+            row.fields.get("title"),
+            Some(&Value::String("Hello".to_string()))
+        );
+    }
+
+    #[test]
+    fn snapshot_export_and_restore_roundtrip() {
+        let dir = tempdir().unwrap();
+        let data_dir = dir.path().to_path_buf();
+        let db = EmbedDb::open(Config::new(data_dir.clone())).unwrap();
+
+        let schema = TableSchema::new(vec![Column::new("title", DataType::String, false)]);
+        db.create_table("notes", schema, None).unwrap();
+
+        let mut fields = BTreeMap::new();
+        fields.insert("title".to_string(), Value::String("Hello".to_string()));
+        let row_id = db.insert_row("notes", fields).unwrap();
+
+        let snap_parent = tempdir().unwrap();
+        let snap_dir = snap_parent.path().join("snapshot");
+        let _ = db.export_snapshot(&snap_dir).unwrap();
+        drop(db);
+
+        let restored_parent = tempdir().unwrap();
+        let restored_dir = restored_parent.path().join("restored");
+        let _ = EmbedDb::restore_snapshot(&snap_dir, &restored_dir).unwrap();
+
+        let reopened = EmbedDb::open(Config::new(restored_dir)).unwrap();
+        let row = reopened.get_row("notes", row_id).unwrap().unwrap();
         assert_eq!(
             row.fields.get("title"),
             Some(&Value::String("Hello".to_string()))

@@ -2,6 +2,7 @@
 
 ## Unreleased
 - Added an exclusive `data_dir` lockfile (`embeddb.lock`) to prevent concurrent processes from opening the same database directory.
+- Added portable snapshot export/restore (copy-only backup) APIs and CLI commands that run a checkpoint and then copy the `data_dir` to a new location with safety checks.
 - Added DB-level WAL checkpoint (`checkpoint`) that flushes tables and rewrites `wal.log` to a compact snapshot (preserving `next_row_id` and embedding state) to prevent unbounded WAL growth.
 - Added opt-in WAL auto-checkpointing (`wal_autocheckpoint_bytes`) that runs a preflight checkpoint before WAL appends when `wal.log` exceeds a byte threshold.
 - Added background embedding retries with exponential backoff (`attempts` + `next_retry_at_ms`) persisted in WAL; jobs only become `failed` after exceeding max attempts.

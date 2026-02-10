@@ -34,6 +34,10 @@ cargo run -p embeddb-cli -- list-tables
 # WAL checkpoint (compact wal.log after flush/compaction cycles)
 cargo run -p embeddb-cli -- checkpoint
 
+# Snapshot export/restore (copy-only backup)
+cargo run -p embeddb-cli -- snapshot-export ./snapshots/embeddb-1
+cargo run -p embeddb-cli -- --data-dir ./data-restored snapshot-restore ./snapshots/embeddb-1
+
 # Table stats
 cargo run -p embeddb-cli -- table-stats notes
 

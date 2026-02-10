@@ -29,6 +29,12 @@ struct Cli {
 enum Commands {
     DbStats,
     Checkpoint,
+    SnapshotExport {
+        dest_dir: PathBuf,
+    },
+    SnapshotRestore {
+        snapshot_dir: PathBuf,
+    },
     ListTables,
     DescribeTable {
         table: String,
@@ -156,120 +162,135 @@ fn main() -> Result<()> {
         Some(bytes) => Config::new(cli.data_dir).with_wal_autocheckpoint_bytes(bytes),
         None => Config::new(cli.data_dir),
     };
-    let db = EmbedDb::open(config)?;
 
-    match cli.command {
-        Commands::DbStats => {
-            let stats = db.db_stats()?;
+    let command = cli.command;
+    match command {
+        Commands::SnapshotRestore { snapshot_dir } => {
+            let stats = EmbedDb::restore_snapshot(snapshot_dir, &config.data_dir)?;
             println!("{}", serde_json::to_string_pretty(&stats)?);
         }
-        Commands::Checkpoint => {
-            let stats = db.checkpoint()?;
-            println!("{}", serde_json::to_string_pretty(&stats)?);
-        }
-        Commands::ListTables => {
-            let tables = db.list_tables()?;
-            for table in tables {
-                println!("{}", table);
+        other => {
+            let db = EmbedDb::open(config)?;
+
+            match other {
+                Commands::DbStats => {
+                    let stats = db.db_stats()?;
+                    println!("{}", serde_json::to_string_pretty(&stats)?);
+                }
+                Commands::Checkpoint => {
+                    let stats = db.checkpoint()?;
+                    println!("{}", serde_json::to_string_pretty(&stats)?);
+                }
+                Commands::SnapshotExport { dest_dir } => {
+                    let stats = db.export_snapshot(dest_dir)?;
+                    println!("{}", serde_json::to_string_pretty(&stats)?);
+                }
+                Commands::ListTables => {
+                    let tables = db.list_tables()?;
+                    for table in tables {
+                        println!("{}", table);
+                    }
+                }
+                Commands::DescribeTable { table } => {
+                    let desc = db.describe_table(&table)?;
+                    println!("{}", serde_json::to_string_pretty(&desc)?);
+                }
+                Commands::TableStats { table } => {
+                    let stats = db.table_stats(&table)?;
+                    println!("{}", serde_json::to_string_pretty(&stats)?);
+                }
+                Commands::CreateTable {
+                    table,
+                    schema,
+                    embed_fields,
+                } => {
+                    let schema = load_schema(schema)?;
+                    let embed_spec = embed_fields.map(|fields| {
+                        let parts: Vec<String> = fields
+                            .split(',')
+                            .map(|s| s.trim().to_string())
+                            .filter(|s| !s.is_empty())
+                            .collect();
+                        EmbeddingSpec::new(parts)
+                    });
+                    db.create_table(table, schema, embed_spec)?;
+                    println!("ok");
+                }
+                Commands::Insert { table, row } => {
+                    let fields = parse_row(&row)?;
+                    let row_id = db.insert_row(&table, fields)?;
+                    println!("{}", row_id);
+                }
+                Commands::Get { table, row_id } => {
+                    let row = db.get_row(&table, row_id)?;
+                    println!("{}", serde_json::to_string_pretty(&row)?);
+                }
+                Commands::Delete { table, row_id } => {
+                    db.delete_row(&table, row_id)?;
+                    println!("ok");
+                }
+                Commands::Jobs { table } => {
+                    let jobs = db.list_embedding_jobs(&table)?;
+                    println!("{}", serde_json::to_string_pretty(&jobs)?);
+                }
+                Commands::ProcessJobs { table, limit } => {
+                    let processed = match limit {
+                        Some(limit) => {
+                            db.process_pending_jobs_with_limit(&table, &LocalHashEmbedder, limit)?
+                        }
+                        None => db.process_pending_jobs(&table, &LocalHashEmbedder)?,
+                    };
+                    println!("{}", processed);
+                }
+                Commands::RetryFailed { table, row_id } => {
+                    let retried = db.retry_failed_jobs(&table, row_id)?;
+                    println!("{}", retried);
+                }
+                Commands::Search {
+                    table,
+                    query,
+                    k,
+                    metric,
+                    filter,
+                } => {
+                    let query_vec = parse_vector(&query)?;
+                    let hits = match filter.as_deref() {
+                        Some(raw) => {
+                            let filters = parse_filters(raw)?;
+                            db.search_knn_filtered(&table, &query_vec, k, metric.into(), &filters)?
+                        }
+                        None => db.search_knn(&table, &query_vec, k, metric.into())?,
+                    };
+                    println!("{}", serde_json::to_string_pretty(&hits)?);
+                }
+                Commands::SearchText {
+                    table,
+                    query_text,
+                    k,
+                    metric,
+                    filter,
+                } => {
+                    let embedder = LocalHashEmbedder;
+                    let query_vec = embedder.embed(&query_text)?;
+                    let hits = match filter.as_deref() {
+                        Some(raw) => {
+                            let filters = parse_filters(raw)?;
+                            db.search_knn_filtered(&table, &query_vec, k, metric.into(), &filters)?
+                        }
+                        None => db.search_knn(&table, &query_vec, k, metric.into())?,
+                    };
+                    println!("{}", serde_json::to_string_pretty(&hits)?);
+                }
+                Commands::Flush { table } => {
+                    db.flush_table(&table)?;
+                    println!("ok");
+                }
+                Commands::Compact { table } => {
+                    db.compact_table(&table)?;
+                    println!("ok");
+                }
+                Commands::SnapshotRestore { .. } => unreachable!("handled above"),
             }
-        }
-        Commands::DescribeTable { table } => {
-            let desc = db.describe_table(&table)?;
-            println!("{}", serde_json::to_string_pretty(&desc)?);
-        }
-        Commands::TableStats { table } => {
-            let stats = db.table_stats(&table)?;
-            println!("{}", serde_json::to_string_pretty(&stats)?);
-        }
-        Commands::CreateTable {
-            table,
-            schema,
-            embed_fields,
-        } => {
-            let schema = load_schema(schema)?;
-            let embed_spec = embed_fields.map(|fields| {
-                let parts: Vec<String> = fields
-                    .split(',')
-                    .map(|s| s.trim().to_string())
-                    .filter(|s| !s.is_empty())
-                    .collect();
-                EmbeddingSpec::new(parts)
-            });
-            db.create_table(table, schema, embed_spec)?;
-            println!("ok");
-        }
-        Commands::Insert { table, row } => {
-            let fields = parse_row(&row)?;
-            let row_id = db.insert_row(&table, fields)?;
-            println!("{}", row_id);
-        }
-        Commands::Get { table, row_id } => {
-            let row = db.get_row(&table, row_id)?;
-            println!("{}", serde_json::to_string_pretty(&row)?);
-        }
-        Commands::Delete { table, row_id } => {
-            db.delete_row(&table, row_id)?;
-            println!("ok");
-        }
-        Commands::Jobs { table } => {
-            let jobs = db.list_embedding_jobs(&table)?;
-            println!("{}", serde_json::to_string_pretty(&jobs)?);
-        }
-        Commands::ProcessJobs { table, limit } => {
-            let processed = match limit {
-                Some(limit) => {
-                    db.process_pending_jobs_with_limit(&table, &LocalHashEmbedder, limit)?
-                }
-                None => db.process_pending_jobs(&table, &LocalHashEmbedder)?,
-            };
-            println!("{}", processed);
-        }
-        Commands::RetryFailed { table, row_id } => {
-            let retried = db.retry_failed_jobs(&table, row_id)?;
-            println!("{}", retried);
-        }
-        Commands::Search {
-            table,
-            query,
-            k,
-            metric,
-            filter,
-        } => {
-            let query_vec = parse_vector(&query)?;
-            let hits = match filter.as_deref() {
-                Some(raw) => {
-                    let filters = parse_filters(raw)?;
-                    db.search_knn_filtered(&table, &query_vec, k, metric.into(), &filters)?
-                }
-                None => db.search_knn(&table, &query_vec, k, metric.into())?,
-            };
-            println!("{}", serde_json::to_string_pretty(&hits)?);
-        }
-        Commands::SearchText {
-            table,
-            query_text,
-            k,
-            metric,
-            filter,
-        } => {
-            let embedder = LocalHashEmbedder;
-            let query_vec = embedder.embed(&query_text)?;
-            let hits = match filter.as_deref() {
-                Some(raw) => {
-                    let filters = parse_filters(raw)?;
-                    db.search_knn_filtered(&table, &query_vec, k, metric.into(), &filters)?
-                }
-                None => db.search_knn(&table, &query_vec, k, metric.into())?,
-            };
-            println!("{}", serde_json::to_string_pretty(&hits)?);
-        }
-        Commands::Flush { table } => {
-            db.flush_table(&table)?;
-            println!("ok");
-        }
-        Commands::Compact { table } => {
-            db.compact_table(&table)?;
-            println!("ok");
         }
     }
 
