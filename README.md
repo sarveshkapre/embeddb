@@ -23,6 +23,9 @@ make check
 cargo run -p embeddb-cli -- --help
 ```
 
+Note: EmbedDB holds an exclusive lock on the configured `data_dir` (via `embeddb.lock`). Only one
+process can open a given `data_dir` at a time.
+
 ## CLI examples
 ```bash
 # List tables

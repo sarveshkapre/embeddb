@@ -12,6 +12,9 @@ Optional env vars:
 - `EMBEDDB_DATA_DIR`: data directory (default `./data`)
 - `EMBEDDB_WAL_AUTOCHECKPOINT_BYTES`: when set, the server will auto-run a WAL `POST /checkpoint` *before* handling a write if `wal.log` is at/above this size (bytes).
 
+Note: The server holds an exclusive lock on `EMBEDDB_DATA_DIR` (via `embeddb.lock`). Don’t point a
+second `embeddb-cli` or `embeddb-server` process at the same directory concurrently.
+
 ## Web Console
 The HTTP server also serves a built-in UI at `http://127.0.0.1:8080`. Use it to create tables,
 insert rows, process embedding jobs, and run text search.

@@ -7,12 +7,14 @@ mod storage;
 mod vector;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::fs;
+use std::fs::{self, File, OpenOptions};
+use std::io::ErrorKind;
 use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, Result};
+use fs2::FileExt;
 use schema::EmbeddingMeta;
 use serde::{Deserialize, Serialize};
 use storage::sst::{self, SstEntry, SstFile};
@@ -168,12 +170,32 @@ struct Inner {
 #[derive(Debug)]
 pub struct EmbedDb {
     _config: Config,
+    _dir_lock: File,
     inner: Mutex<Inner>,
 }
 
 impl EmbedDb {
     pub fn open(config: Config) -> Result<Self> {
         fs::create_dir_all(&config.data_dir)?;
+
+        // Prevent concurrent processes from opening the same data directory. EmbedDB is not
+        // multi-process safe; a second writer can corrupt WAL/SST state.
+        let lock_path = config.data_dir.join("embeddb.lock");
+        let lock_file = OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(&lock_path)?;
+        if let Err(e) = lock_file.try_lock_exclusive() {
+            if e.kind() == ErrorKind::WouldBlock {
+                return Err(anyhow!(
+                    "data_dir is already in use (lock held): {}",
+                    config.data_dir.display()
+                ));
+            }
+            return Err(e.into());
+        }
 
         let wal_path = config.data_dir.join("wal.log");
         let wal_prev_path = config.data_dir.join("wal.prev");
@@ -202,6 +224,7 @@ impl EmbedDb {
 
         Ok(Self {
             _config: config,
+            _dir_lock: lock_file,
             inner: Mutex::new(Inner { wal, state }),
         })
     }

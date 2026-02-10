@@ -7,12 +7,14 @@
 - Gaps found during codebase exploration
 
 ## Candidate Features To Do
+- [ ] P1: Add an exclusive `data_dir` lock (lockfile held for process lifetime) to prevent concurrent opens that can corrupt WAL/SST state.
+  Score: impact high | effort low-med | strategic fit high | differentiation low | risk low | confidence high
+- [ ] P1: Portable snapshot export/restore CLI (`snapshot-export`/`snapshot-restore`) with safety checks (refuse non-empty dest) and checkpoint integration for consistent copy-only backups.
+  Score: impact med-high | effort med | strategic fit high | differentiation low | risk low-med | confidence med-high
 - [ ] P2: Add lightweight metrics counters (embedding throughput, WAL sync counts, flush/compaction durations) exposed via stats.
   Score: impact med | effort med | strategic fit med | differentiation low | risk low-med | confidence med
 - [ ] P2: Bulk ingest CLI (`ingest-jsonl`/`ingest-csv`) with progress and resumable embedding processing.
   Score: impact med-high | effort med-high | strategic fit high | differentiation low-med | risk low-med | confidence med
-- [ ] P2: Portable snapshot export/restore (copy-only backups for `data_dir`, with safety checks).
-  Score: impact med-high | effort med | strategic fit med-high | differentiation low | risk med | confidence med
 - [ ] P2: Re-enable blocking `dependency-review` once dependency graph support is confirmed in repo settings.
   Score: impact low-med | effort low | strategic fit med | differentiation none | risk low | confidence med
 - [ ] P3: HNSW v1 index for large-table search latency reduction (persisted index + rebuild strategy).
