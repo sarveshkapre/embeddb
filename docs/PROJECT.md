@@ -17,6 +17,6 @@
 - Process-level smoke: `bash scripts/http_process_smoke.sh`
 
 ## Next 3 improvements
-1. Add an exclusive `data_dir` lock to prevent concurrent opens.
-2. Portable snapshot export/restore (copy-only backups for `data_dir`, with safety checks).
-3. Add lightweight metrics counters (embedding throughput/retry rate, WAL fsync counts, compaction durations).
+1. Add lightweight metrics counters (embedding throughput/retry rate, WAL fsync counts, flush/compaction durations).
+2. Bulk ingest CLI (JSONL/CSV) with progress and resumable embedding processing.
+3. Persisted ANN index (HNSW v1) for large-table search latency reduction.
