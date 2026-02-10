@@ -7,10 +7,6 @@
 - Gaps found during codebase exploration
 
 ## Candidate Features To Do
-- [ ] P1: Add an exclusive `data_dir` lock (lockfile held for process lifetime) to prevent concurrent opens that can corrupt WAL/SST state.
-  Score: impact high | effort low-med | strategic fit high | differentiation low | risk low | confidence high
-- [ ] P1: Portable snapshot export/restore CLI (`snapshot-export`/`snapshot-restore`) with safety checks (refuse non-empty dest) and checkpoint integration for consistent copy-only backups.
-  Score: impact med-high | effort med | strategic fit high | differentiation low | risk low-med | confidence med-high
 - [ ] P2: Add lightweight metrics counters (embedding throughput, WAL sync counts, flush/compaction durations) exposed via stats.
   Score: impact med | effort med | strategic fit med | differentiation low | risk low-med | confidence med
 - [ ] P2: Bulk ingest CLI (`ingest-jsonl`/`ingest-csv`) with progress and resumable embedding processing.
@@ -25,6 +21,10 @@
   Score: impact med-high | effort med-high | strategic fit high | differentiation low | risk med | confidence low-med
 
 ## Implemented
+- [x] 2026-02-10: Added an exclusive `data_dir` lockfile (`embeddb.lock`) held for process lifetime to prevent concurrent opens of the same DB directory.
+  Evidence: `crates/embeddb/src/lib.rs` (`EmbedDb::open` lock acquisition), `README.md`, `docs/HTTP.md`, `CHANGELOG.md`
+- [x] 2026-02-10: Added portable snapshot export/restore (copy-only backup) APIs + CLI commands, implemented as checkpoint + safe directory copy.
+  Evidence: `crates/embeddb/src/lib.rs` (`export_snapshot`, `restore_snapshot`, test `snapshot_export_and_restore_roundtrip`), `crates/embeddb-cli/src/main.rs` (`snapshot-export`, `snapshot-restore`), `README.md`, `CHANGELOG.md`
 - [x] 2026-02-09: Added metadata filtering to brute-force kNN search (MVP `AND` filters: equality + numeric ranges) exposed via CLI/HTTP, plus process-smoke coverage.
   Evidence: `crates/embeddb/src/lib.rs` (`FilterCondition`, `FilterOp`, `search_knn_filtered`, tests `search_knn_filtered_applies_scalar_filters`), `crates/embeddb-cli/src/main.rs` (`search --filter`, `search-text --filter`), `crates/embeddb-server/src/main.rs` (`filter` request support), `docs/HTTP.md` and `README.md` examples, `scripts/http_process_smoke.sh` (filtered search assertion).
 - [x] 2026-02-09: Added opt-in WAL auto-checkpointing when `wal.log` crosses a configured byte threshold (preflight checkpoint before WAL appends).
@@ -88,6 +88,11 @@
 - Market scan (untrusted web): WAL-backed systems generally need checkpoint/truncation hooks; SQLite exposes manual + auto-checkpointing, including truncate mode, to bound log growth.
 - Market scan sources (untrusted): SQLite `wal_checkpoint(TRUNCATE)` + `wal_autocheckpoint` docs https://www.sqlite.org/pragma.html
 - Market scan sources (untrusted): pgvector notes on combining ANN with `WHERE` filtering https://github.com/pgvector/pgvector
+- Market scan (untrusted web): embedded/vector DB baselines also expose some form of snapshot/backup/export (checkpointed directory snapshots or logical export/import) for portability and DR.
+- Market scan sources (untrusted): SQLite Online Backup API https://sqlite.org/backup.html
+- Market scan sources (untrusted): RocksDB Checkpoints https://github.com/facebook/rocksdb/wiki/Checkpoints
+- Market scan sources (untrusted): DuckDB `EXPORT DATABASE`/`IMPORT DATABASE` https://duckdb.org/docs/stable/sql/statements/export
+- Market scan sources (untrusted): Qdrant snapshots https://qdrant.tech/documentation/concepts/snapshots/
 - Gap map: missing: persisted ANN index (HNSW) for larger tables.
 - Gap map: missing: metadata filtering for vector search (at least equality + range on scalar fields).
 - Gap map: weak: observability/ops (metrics, progress, WAL checkpoints).

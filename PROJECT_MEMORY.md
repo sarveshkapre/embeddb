@@ -124,6 +124,29 @@
 - Confidence: high
 - Trust label: verified-local-tests
 
+### 2026-02-10: Add exclusive `data_dir` lock to prevent concurrent opens
+- Decision: Acquire an exclusive lock on `data_dir/embeddb.lock` for the lifetime of the `EmbedDb` handle, and fail fast if the lock is already held.
+- Why: EmbedDB is not multi-process safe; concurrent processes pointing at the same directory can corrupt WAL/SST state. A lock is a low-effort, high-impact production safety rail.
+- Evidence:
+  - `crates/embeddb/src/lib.rs` (`EmbedDb::open` lock acquisition via `fs2`)
+  - Docs: `README.md`, `docs/HTTP.md`
+- Commit: `cfb14eb8147116737794c6a9c4a90fb0446cc2d7`
+- Confidence: high
+- Trust label: verified-local-tests
+- Follow-ups:
+  - Consider a `read_only` mode if multi-process read access becomes a requirement.
+
+### 2026-02-10: Add portable snapshot export/restore (copy-only backups)
+- Decision: Implement snapshot export/restore as `checkpoint` plus a safe directory copy, exposed via core APIs and CLI commands (`snapshot-export`, `snapshot-restore`).
+- Why: Portability/DR needs a supported backup path; a checkpointed copy of `data_dir` is the simplest reliable MVP and unlocks operator workflows and future tooling.
+- Evidence:
+  - `crates/embeddb/src/lib.rs` (`export_snapshot`, `restore_snapshot`, test `snapshot_export_and_restore_roundtrip`)
+  - `crates/embeddb-cli/src/main.rs` (CLI commands)
+  - Docs: `README.md`
+- Commit: `21d57b17d17a96d3641457507282a7c5680354b2`
+- Confidence: med-high
+- Trust label: verified-local-smoke
+
 ## Verification Evidence
 - `cargo fmt --all` (pass)
 - `cargo clippy --workspace --all-targets -- -D warnings` (pass)
@@ -131,3 +154,4 @@
 - `cargo test -p embeddb-server --features http,contract-tests` (pass)
 - `bash scripts/http_process_smoke.sh` (pass)
 - `make check` (pass)
+- `bash -lc 'set -euo pipefail; d1=$(mktemp -d); d2=$(mktemp -d); snap=$(mktemp -d)/snap; schema=$(mktemp); cat >"$schema" <<JSON\n{"columns":[{"name":"title","data_type":"String","nullable":false}]}\nJSON\ncargo run -q -p embeddb-cli -- --data-dir "$d1" create-table notes --schema "$schema"; rid=$(cargo run -q -p embeddb-cli -- --data-dir "$d1" insert notes --row "{\\"title\\":\\"hello\\"}"); cargo run -q -p embeddb-cli -- --data-dir "$d1" snapshot-export "$snap" >/dev/null; cargo run -q -p embeddb-cli -- --data-dir "$d2" snapshot-restore "$snap" >/dev/null; out=$(cargo run -q -p embeddb-cli -- --data-dir "$d2" get notes "$rid"); echo "$out" | grep -q "hello"'` (pass)
