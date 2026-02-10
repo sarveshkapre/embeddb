@@ -147,6 +147,16 @@
 - Confidence: med-high
 - Trust label: verified-local-smoke
 
+### 2026-02-10: Refactor core layout (no behavior change)
+- Decision: Split `embeddb` unit tests out of `crates/embeddb/src/lib.rs` into `crates/embeddb/src/tests.rs`; add a small `EmbedDb::lock_inner()` helper; rename the internal `EmbedDb` field to `config` for clarity.
+- Why: Reduce `lib.rs` size and repetition; make core code easier to navigate while preserving behavior.
+- Evidence:
+  - `crates/embeddb/src/lib.rs` (`lock_inner`, `#[cfg(test)] mod tests;`, `config` field)
+  - `crates/embeddb/src/tests.rs` (moved unit tests)
+- Commit: `d4dc2002d22cd5ff0aed8e66315f833571d7c226`
+- Confidence: high
+- Trust label: verified-local-tests
+
 ## Verification Evidence
 - `cargo fmt --all` (pass)
 - `cargo clippy --workspace --all-targets -- -D warnings` (pass)
@@ -155,3 +165,4 @@
 - `bash scripts/http_process_smoke.sh` (pass)
 - `make check` (pass)
 - `bash -lc 'set -euo pipefail; d1=$(mktemp -d); d2=$(mktemp -d); snap=$(mktemp -d)/snap; schema=$(mktemp); cat >"$schema" <<JSON\n{"columns":[{"name":"title","data_type":"String","nullable":false}]}\nJSON\ncargo run -q -p embeddb-cli -- --data-dir "$d1" create-table notes --schema "$schema"; rid=$(cargo run -q -p embeddb-cli -- --data-dir "$d1" insert notes --row "{\\"title\\":\\"hello\\"}"); cargo run -q -p embeddb-cli -- --data-dir "$d1" snapshot-export "$snap" >/dev/null; cargo run -q -p embeddb-cli -- --data-dir "$d2" snapshot-restore "$snap" >/dev/null; out=$(cargo run -q -p embeddb-cli -- --data-dir "$d2" get notes "$rid"); echo "$out" | grep -q "hello"'` (pass)
+- 2026-02-10 (refactor): `make check` (pass)

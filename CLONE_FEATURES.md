@@ -21,6 +21,8 @@
   Score: impact med-high | effort med-high | strategic fit high | differentiation low | risk med | confidence low-med
 
 ## Implemented
+- [x] 2026-02-10: Refactor: split `embeddb` unit tests into `crates/embeddb/src/tests.rs`, add `EmbedDb::lock_inner()` helper, and clarify `EmbedDb` config field naming (no behavior change).
+  Evidence: `crates/embeddb/src/lib.rs`, `crates/embeddb/src/tests.rs`
 - [x] 2026-02-10: Added an exclusive `data_dir` lockfile (`embeddb.lock`) held for process lifetime to prevent concurrent opens of the same DB directory.
   Evidence: `crates/embeddb/src/lib.rs` (`EmbedDb::open` lock acquisition), `README.md`, `docs/HTTP.md`, `CHANGELOG.md`
 - [x] 2026-02-10: Added portable snapshot export/restore (copy-only backup) APIs + CLI commands, implemented as checkpoint + safe directory copy.
