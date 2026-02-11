@@ -2,6 +2,26 @@
 
 ## Decisions
 
+### 2026-02-11: Expand operator observability and job visibility surfaces
+- Decision:
+  - Added runtime metrics accounting in core for durable WAL appends/syncs, job processing outcomes, and flush/compact/checkpoint counts + cumulative durations.
+  - Extended `db_stats` and `table_stats` payloads with these counters.
+  - Exposed embedding retry metadata (`attempts`, `next_retry_at_ms`) in `list_embedding_jobs`.
+  - Added HTTP `GET /tables/:table/jobs` for API parity with CLI job visibility.
+- Why: Production operation needs low-friction visibility into write durability pressure, background job behavior, and maintenance activity without reading logs or internal files.
+- Evidence:
+  - `crates/embeddb/src/lib.rs` (`RuntimeMetrics`, `TableRuntimeMetrics`, stats payload expansion, instrumentation in WAL/write/job/flush/compact/checkpoint paths)
+  - `crates/embeddb/src/tests.rs` (`table_and_db_stats_track_runtime_operation_metrics`, `table_and_db_stats_track_retry_and_failure_metrics`)
+  - `crates/embeddb-server/src/main.rs` (new jobs route + expanded contract schemas)
+  - `scripts/http_process_smoke.sh` (stats + jobs assertions)
+  - `README.md`, `docs/HTTP.md`, `CHANGELOG.md`
+- Commit: pending
+- Confidence: high
+- Trust label: trusted
+- Follow-ups:
+  - Add optional status filters on `GET /tables/:table/jobs` for large tables.
+  - Add bulk ingest pipeline to drive these metrics on real workloads.
+
 ### 2026-02-09: Add WAL checkpoint/rotation to bound WAL growth
 - Decision: Implement a DB-level `checkpoint` that flushes memtables to SSTs, then rewrites `wal.log` to a compact snapshot (tables + `next_row_id` + embedding state) and safely rotates via `wal.prev` to tolerate interrupted checkpoints.
 - Why: WAL growth is unbounded in the current design; production usage needs a supported way to compact/rotate WAL without losing ID allocation or embedding job state.
@@ -157,7 +177,17 @@
 - Confidence: high
 - Trust label: verified-local-tests
 
+## Mistakes And Fixes
+- 2026-02-11: No production regression observed in this session. Root-cause-style incident entry not required.
+- Prevention rule: keep contract + process smoke coverage aligned whenever API payload fields are expanded.
+
 ## Verification Evidence
+- 2026-02-11: `cargo fmt --all` (pass)
+- 2026-02-11: `cargo clippy --workspace --all-targets -- -D warnings` (pass)
+- 2026-02-11: `cargo test --workspace` (pass)
+- 2026-02-11: `cargo test -p embeddb-server --features http,contract-tests` (pass)
+- 2026-02-11: `bash scripts/http_process_smoke.sh` (pass)
+- 2026-02-11: `make check` (pass)
 - `cargo fmt --all` (pass)
 - `cargo clippy --workspace --all-targets -- -D warnings` (pass)
 - `cargo test --workspace` (pass)

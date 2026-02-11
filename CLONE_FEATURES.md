@@ -7,20 +7,38 @@
 - Gaps found during codebase exploration
 
 ## Candidate Features To Do
-- [ ] P2: Add lightweight metrics counters (embedding throughput, WAL sync counts, flush/compaction durations) exposed via stats.
-  Score: impact med | effort med | strategic fit med | differentiation low | risk low-med | confidence med
 - [ ] P2: Bulk ingest CLI (`ingest-jsonl`/`ingest-csv`) with progress and resumable embedding processing.
   Score: impact med-high | effort med-high | strategic fit high | differentiation low-med | risk low-med | confidence med
+- [ ] P2: Add optional `--fail-on-embedding-errors` mode for `process-jobs` and HTTP process endpoint to support strict pipelines.
+  Score: impact med | effort low-med | strategic fit med-high | differentiation low | risk low | confidence med
+- [ ] P2: Add `jobs --status` filter (`pending|ready|failed`) in CLI + HTTP for faster ops triage on large tables.
+  Score: impact med | effort low | strategic fit med | differentiation low | risk low | confidence med-high
 - [ ] P2: Re-enable blocking `dependency-review` once dependency graph support is confirmed in repo settings.
   Score: impact low-med | effort low | strategic fit med | differentiation none | risk low | confidence med
+- [ ] P2: Add a randomized crash/recovery test harness for WAL + flush/compact + reopen invariants.
+  Score: impact med-high | effort med-high | strategic fit high | differentiation low | risk med | confidence low-med
+- [ ] P2: Add startup integrity check command (`verify`) to scan SST/WAL consistency and report repair hints.
+  Score: impact med-high | effort med | strategic fit high | differentiation med | risk med | confidence low-med
+- [ ] P3: Add filter pushdown acceleration (avoid per-hit SST point lookups for scalar-filtered vector search).
+  Score: impact med-high | effort high | strategic fit med-high | differentiation med | risk med | confidence low-med
 - [ ] P3: HNSW v1 index for large-table search latency reduction (persisted index + rebuild strategy).
   Score: impact high | effort high | strategic fit high | differentiation med | risk med-high | confidence low
-- [ ] P3: Hybrid keyword + vector search (simple term match or BM25 + vector rerank hook).
+- [ ] P3: Hybrid keyword + vector search (term match/BM25 candidate stage + vector rerank).
   Score: impact med-high | effort high | strategic fit med-high | differentiation med | risk med | confidence low
-- [ ] P3: Randomized/crash-recovery harness for WAL + flush/compact + reopen visibility invariants.
-  Score: impact med-high | effort med-high | strategic fit high | differentiation low | risk med | confidence low-med
+- [ ] P3: Add read-only open mode to allow safe concurrent readers with lock semantics documented.
+  Score: impact med | effort med | strategic fit med | differentiation low | risk med | confidence low-med
+- [ ] P3: Add snapshot manifest checksums + restore verification to harden backup integrity.
+  Score: impact med | effort med | strategic fit med-high | differentiation low | risk low-med | confidence med
+- [ ] P3: Add metrics export endpoint in Prometheus text format for long-running server observability.
+  Score: impact med | effort med | strategic fit med | differentiation low | risk low-med | confidence med
 
 ## Implemented
+- [x] 2026-02-11: Added runtime operational counters to `db_stats` + `table_stats` (durable WAL appends/sync ops, embedding processed/failed/retried totals, flush/compact/checkpoint counts and cumulative durations).
+  Evidence: `crates/embeddb/src/lib.rs` (`DbStats`, `TableStats`, runtime metrics wiring), `crates/embeddb/src/tests.rs` (`table_and_db_stats_track_runtime_operation_metrics`, `table_and_db_stats_track_retry_and_failure_metrics`), `crates/embeddb-server/src/main.rs` (expanded response contracts), `scripts/http_process_smoke.sh` (stats assertions).
+- [x] 2026-02-11: Exposed embedding retry metadata in job listings (`attempts`, `next_retry_at_ms`) and added HTTP `GET /tables/:table/jobs`.
+  Evidence: `crates/embeddb/src/lib.rs` (`EmbeddingJob`, `list_embedding_jobs`), `crates/embeddb-server/src/main.rs` (route + handler + `list_jobs_response_schema`), `docs/HTTP.md`, `README.md`, `scripts/http_process_smoke.sh`.
+- [x] 2026-02-11: Extended HTTP contract/smoke coverage for observability surfaces and jobs visibility.
+  Evidence: `crates/embeddb-server/src/main.rs` (db/table stats contract updates + jobs schema + smoke flow job assertion), `scripts/http_process_smoke.sh`, `CHANGELOG.md`.
 - [x] 2026-02-10: Refactor: split `embeddb` unit tests into `crates/embeddb/src/tests.rs`, add `EmbedDb::lock_inner()` helper, and clarify `EmbedDb` config field naming (no behavior change).
   Evidence: `crates/embeddb/src/lib.rs`, `crates/embeddb/src/tests.rs`
 - [x] 2026-02-10: Added an exclusive `data_dir` lockfile (`embeddb.lock`) held for process lifetime to prevent concurrent opens of the same DB directory.
@@ -95,10 +113,17 @@
 - Market scan sources (untrusted): RocksDB Checkpoints https://github.com/facebook/rocksdb/wiki/Checkpoints
 - Market scan sources (untrusted): DuckDB `EXPORT DATABASE`/`IMPORT DATABASE` https://duckdb.org/docs/stable/sql/statements/export
 - Market scan sources (untrusted): Qdrant snapshots https://qdrant.tech/documentation/concepts/snapshots/
+- Market scan refresh 2026-02-11 (untrusted web): operator baselines emphasize explicit payload filtering, batch upserts, and visible collection/runtime telemetry.
+- Market scan sources (untrusted): Qdrant filtering https://qdrant.tech/documentation/concepts/filtering/
+- Market scan sources (untrusted): Qdrant points/batch APIs https://qdrant.tech/documentation/concepts/points/
+- Market scan sources (untrusted): pgvector ANN + filtered query patterns https://github.com/pgvector/pgvector
+- Market scan sources (untrusted): DuckDB VSS extension baseline https://duckdb.org/docs/stable/core_extensions/vss.html
+- Market scan sources (untrusted): Chroma metadata filtering https://docs.trychroma.com/docs/querying-collections/metadata-filtering
 - Gap map: missing: persisted ANN index (HNSW) for larger tables.
-- Gap map: missing: metadata filtering for vector search (at least equality + range on scalar fields).
-- Gap map: weak: observability/ops (metrics, progress, WAL checkpoints).
+- Gap map: weak: high-volume ingest ergonomics (batch/resume ingestion).
+- Gap map: weak: ANN latency path (still brute-force only).
 - Gap map: parity: durable WAL-first writes + background embeddings + brute-force kNN MVP.
+- Gap map: parity: scalar metadata filters and operator-visible runtime counters are now available.
 - Gap map: differentiator: per-row embedding jobs with idempotent status tracking integrated into a local-first embedded DB.
 
 ## Notes
