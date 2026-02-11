@@ -43,6 +43,11 @@ curl -s http://127.0.0.1:8080/health
 ```bash
 curl -s http://127.0.0.1:8080/stats
 ```
+Includes runtime counters such as:
+- durable WAL appends / sync operations
+- total checkpoint count + auto-checkpoint count + cumulative checkpoint time
+- cumulative flush/compact counts + durations
+- cumulative embedding processed/failed/retried counts
 
 ### WAL checkpoint
 `POST /checkpoint`
@@ -102,6 +107,10 @@ curl -s http://127.0.0.1:8080/tables/notes
 ```bash
 curl -s http://127.0.0.1:8080/tables/notes/stats
 ```
+Includes per-table runtime counters such as:
+- durable WAL appends
+- embedding processed/failed/retried totals
+- flush/compact counts and cumulative durations
 
 ### Insert row
 `POST /tables/:table/rows`
@@ -204,6 +213,17 @@ curl -s -X POST http://127.0.0.1:8080/tables/notes/jobs/process
 ```
 ```bash
 curl -s -X POST "http://127.0.0.1:8080/tables/notes/jobs/process?limit=100"
+```
+
+### List embedding jobs
+`GET /tables/:table/jobs`
+
+Returns deterministic `row_id`-sorted jobs and includes retry metadata per row:
+- `attempts`: consecutive failure count since last success/enqueue
+- `next_retry_at_ms`: unix epoch millis when the row becomes eligible again
+
+```bash
+curl -s http://127.0.0.1:8080/tables/notes/jobs
 ```
 
 ### Retry failed embedding jobs

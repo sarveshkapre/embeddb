@@ -45,6 +45,10 @@ if ! curl --silent --show-error --fail "${BASE_URL}/health" >/dev/null 2>&1; the
   exit 1
 fi
 
+DB_STATS="$(curl --silent --show-error --fail "${BASE_URL}/stats")"
+echo "${DB_STATS}" | grep -q '"wal_durable_appends"'
+echo "${DB_STATS}" | grep -q '"checkpoint_total_ms"'
+
 curl --silent --show-error --fail \
   -H "content-type: application/json" \
   -d '{
@@ -70,6 +74,14 @@ curl --silent --show-error --fail \
   "${BASE_URL}/tables/notes/rows" >/dev/null
 
 curl --silent --show-error --fail -X POST "${BASE_URL}/tables/notes/jobs/process" >/dev/null
+
+JOBS="$(curl --silent --show-error --fail "${BASE_URL}/tables/notes/jobs")"
+echo "${JOBS}" | grep -q '"attempts"'
+echo "${JOBS}" | grep -q '"next_retry_at_ms"'
+
+TABLE_STATS="$(curl --silent --show-error --fail "${BASE_URL}/tables/notes/stats")"
+echo "${TABLE_STATS}" | grep -q '"embeddings_processed_total"'
+echo "${TABLE_STATS}" | grep -q '"flush_count"'
 
 SEARCH_ALL="$(curl --silent --show-error --fail \
   -H "content-type: application/json" \

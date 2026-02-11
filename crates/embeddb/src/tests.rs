@@ -227,6 +227,9 @@ fn db_stats_reports_tables_and_wal_bytes() {
 
     let stats = db.db_stats().unwrap();
     assert_eq!(stats.tables, 1);
+    assert!(stats.wal_bytes > 0);
+    assert!(stats.wal_durable_appends > 0);
+    assert!(stats.wal_sync_ops >= stats.wal_durable_appends);
 }
 
 #[test]
@@ -644,4 +647,95 @@ fn snapshot_export_and_restore_roundtrip() {
         row.fields.get("title"),
         Some(&Value::String("Hello".to_string()))
     );
+}
+
+#[test]
+fn table_and_db_stats_track_runtime_operation_metrics() {
+    let dir = tempdir().unwrap();
+    let db = EmbedDb::open(Config::new(dir.path().to_path_buf())).unwrap();
+
+    let schema = TableSchema::new(vec![
+        Column::new("title", DataType::String, false),
+        Column::new("body", DataType::String, false),
+    ]);
+    db.create_table(
+        "notes",
+        schema,
+        Some(EmbeddingSpec::new(vec!["title", "body"])),
+    )
+    .unwrap();
+
+    let mut fields = BTreeMap::new();
+    fields.insert("title".to_string(), Value::String("Hello".to_string()));
+    fields.insert("body".to_string(), Value::String("World".to_string()));
+    db.insert_row("notes", fields).unwrap();
+    db.process_pending_jobs("notes", &DummyEmbedder).unwrap();
+    db.flush_table("notes").unwrap();
+    db.compact_table("notes").unwrap();
+    db.checkpoint().unwrap();
+
+    let table_stats = db.table_stats("notes").unwrap();
+    assert_eq!(table_stats.embeddings_processed_total, 1);
+    assert_eq!(table_stats.embeddings_failed_total, 0);
+    assert_eq!(table_stats.embeddings_retried_total, 0);
+    assert!(table_stats.wal_durable_appends >= 4);
+    assert_eq!(table_stats.flush_count, 1);
+    assert_eq!(table_stats.compact_count, 1);
+
+    let db_stats = db.db_stats().unwrap();
+    assert!(db_stats.wal_durable_appends >= table_stats.wal_durable_appends);
+    assert!(db_stats.wal_sync_ops > db_stats.wal_durable_appends);
+    assert_eq!(db_stats.checkpoints, 1);
+    assert_eq!(db_stats.auto_checkpoints, 0);
+    assert_eq!(db_stats.embeddings_processed_total, 1);
+    assert_eq!(db_stats.embeddings_failed_total, 0);
+    assert_eq!(db_stats.embeddings_retried_total, 0);
+    assert!(db_stats.flush_count_total >= 1);
+    assert!(db_stats.compact_count_total >= 1);
+}
+
+#[test]
+fn table_and_db_stats_track_retry_and_failure_metrics() {
+    let dir = tempdir().unwrap();
+    let db = EmbedDb::open(Config::new(dir.path().to_path_buf())).unwrap();
+    db.create_table(
+        "notes",
+        TableSchema::new(vec![Column::new("title", DataType::String, false)]),
+        Some(EmbeddingSpec::new(vec!["title"])),
+    )
+    .unwrap();
+
+    let mut fields = BTreeMap::new();
+    fields.insert("title".to_string(), Value::String("Hello".to_string()));
+    let row_id = db.insert_row("notes", fields).unwrap();
+
+    let now_ms = 1_000_000u64;
+    let processed = db
+        .process_pending_jobs_internal_at("notes", &AlwaysFailEmbedder, None, now_ms)
+        .unwrap();
+    assert_eq!(processed, 1);
+    let retried = db.retry_failed_jobs("notes", Some(row_id)).unwrap();
+    assert_eq!(retried, 0);
+
+    // Drive to failed and retry.
+    let mut tick = now_ms;
+    for _ in 0..EMBEDDING_MAX_ATTEMPTS {
+        let _ = db
+            .process_pending_jobs_internal_at("notes", &AlwaysFailEmbedder, None, tick)
+            .unwrap();
+        let jobs = db.list_embedding_jobs("notes").unwrap();
+        if jobs[0].status == EmbeddingStatus::Failed {
+            break;
+        }
+        tick = jobs[0].next_retry_at_ms;
+    }
+    let retried = db.retry_failed_jobs("notes", Some(row_id)).unwrap();
+    assert_eq!(retried, 1);
+
+    let table_stats = db.table_stats("notes").unwrap();
+    assert!(table_stats.embeddings_failed_total >= EMBEDDING_MAX_ATTEMPTS as u64);
+    assert_eq!(table_stats.embeddings_retried_total, 1);
+    let db_stats = db.db_stats().unwrap();
+    assert!(db_stats.embeddings_failed_total >= EMBEDDING_MAX_ATTEMPTS as u64);
+    assert_eq!(db_stats.embeddings_retried_total, 1);
 }

@@ -1,6 +1,9 @@
 # CHANGELOG
 
 ## Unreleased
+- Added runtime operational counters to `db_stats`/`table_stats` (durable WAL appends/syncs, embedding processed/failed/retried totals, and flush/compact/checkpoint counters + cumulative durations).
+- Exposed embedding retry metadata (`attempts`, `next_retry_at_ms`) in job listings and added HTTP `GET /tables/:table/jobs`.
+- Extended HTTP contract + smoke tests to cover the expanded stats payloads and jobs listing route.
 - Added an exclusive `data_dir` lockfile (`embeddb.lock`) to prevent concurrent processes from opening the same database directory.
 - Added portable snapshot export/restore (copy-only backup) APIs and CLI commands that run a checkpoint and then copy the `data_dir` to a new location with safety checks.
 - Added DB-level WAL checkpoint (`checkpoint`) that flushes tables and rewrites `wal.log` to a compact snapshot (preserving `next_row_id` and embedding state) to prevent unbounded WAL growth.

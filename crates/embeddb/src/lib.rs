@@ -12,7 +12,7 @@ use std::io::ErrorKind;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, Result};
 use fs2::FileExt;
@@ -87,6 +87,8 @@ pub struct EmbeddingJob {
     pub status: EmbeddingStatus,
     pub content_hash: String,
     pub last_error: Option<String>,
+    pub attempts: u32,
+    pub next_retry_at_ms: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -130,12 +132,32 @@ pub struct TableStats {
     pub embeddings_failed: usize,
     pub sst_files: usize,
     pub next_row_id: u64,
+    pub wal_durable_appends: u64,
+    pub embeddings_processed_total: u64,
+    pub embeddings_failed_total: u64,
+    pub embeddings_retried_total: u64,
+    pub flush_count: u64,
+    pub flush_total_ms: u64,
+    pub compact_count: u64,
+    pub compact_total_ms: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DbStats {
     pub tables: usize,
     pub wal_bytes: u64,
+    pub wal_durable_appends: u64,
+    pub wal_sync_ops: u64,
+    pub checkpoints: u64,
+    pub auto_checkpoints: u64,
+    pub checkpoint_total_ms: u64,
+    pub flush_count_total: u64,
+    pub flush_total_ms: u64,
+    pub compact_count_total: u64,
+    pub compact_total_ms: u64,
+    pub embeddings_processed_total: u64,
+    pub embeddings_failed_total: u64,
+    pub embeddings_retried_total: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -161,6 +183,7 @@ struct TableState {
     embedding_spec: Option<EmbeddingSpec>,
     sst_files: Vec<SstFile>,
     next_sst_seq: u64,
+    metrics: TableRuntimeMetrics,
 }
 
 #[derive(Debug)]
@@ -172,6 +195,35 @@ struct DbState {
 struct Inner {
     wal: Wal,
     state: DbState,
+    metrics: RuntimeMetrics,
+}
+
+#[derive(Debug, Default)]
+struct TableRuntimeMetrics {
+    wal_durable_appends: u64,
+    embeddings_processed_total: u64,
+    embeddings_failed_total: u64,
+    embeddings_retried_total: u64,
+    flush_count: u64,
+    flush_total_ms: u64,
+    compact_count: u64,
+    compact_total_ms: u64,
+}
+
+#[derive(Debug, Default)]
+struct RuntimeMetrics {
+    wal_durable_appends: u64,
+    wal_sync_ops: u64,
+    checkpoints: u64,
+    auto_checkpoints: u64,
+    checkpoint_total_ms: u64,
+    flush_count_total: u64,
+    flush_total_ms: u64,
+    compact_count_total: u64,
+    compact_total_ms: u64,
+    embeddings_processed_total: u64,
+    embeddings_failed_total: u64,
+    embeddings_retried_total: u64,
 }
 
 #[derive(Debug)]
@@ -234,7 +286,11 @@ impl EmbedDb {
         Ok(Self {
             config,
             _dir_lock: lock_file,
-            inner: Mutex::new(Inner { wal, state }),
+            inner: Mutex::new(Inner {
+                wal,
+                state,
+                metrics: RuntimeMetrics::default(),
+            }),
         })
     }
 
@@ -253,22 +309,70 @@ impl EmbedDb {
         if wal_bytes >= threshold {
             // Preflight checkpoint before the caller appends additional WAL records, so an
             // auto-checkpoint failure does not occur after a successful write.
-            let _ = self.checkpoint()?;
+            let _ = self.checkpoint_internal(true)?;
         }
 
         Ok(())
     }
 
+    fn checkpoint_internal(&self, auto: bool) -> Result<CheckpointStats> {
+        let mut inner = self.lock_inner()?;
+        checkpoint_locked(&self.config.data_dir, &mut inner, auto)
+    }
+
     pub fn db_stats(&self) -> Result<DbStats> {
-        let tables = {
+        let (
+            tables,
+            wal_durable_appends,
+            wal_sync_ops,
+            checkpoints,
+            auto_checkpoints,
+            checkpoint_total_ms,
+            flush_count_total,
+            flush_total_ms,
+            compact_count_total,
+            compact_total_ms,
+            embeddings_processed_total,
+            embeddings_failed_total,
+            embeddings_retried_total,
+        ) = {
             let inner = self.lock_inner()?;
-            inner.state.tables.len()
+            (
+                inner.state.tables.len(),
+                inner.metrics.wal_durable_appends,
+                inner.metrics.wal_sync_ops,
+                inner.metrics.checkpoints,
+                inner.metrics.auto_checkpoints,
+                inner.metrics.checkpoint_total_ms,
+                inner.metrics.flush_count_total,
+                inner.metrics.flush_total_ms,
+                inner.metrics.compact_count_total,
+                inner.metrics.compact_total_ms,
+                inner.metrics.embeddings_processed_total,
+                inner.metrics.embeddings_failed_total,
+                inner.metrics.embeddings_retried_total,
+            )
         };
 
         let wal_path = self.config.data_dir.join("wal.log");
         let wal_bytes = fs::metadata(wal_path).map(|m| m.len()).unwrap_or(0);
 
-        Ok(DbStats { tables, wal_bytes })
+        Ok(DbStats {
+            tables,
+            wal_bytes,
+            wal_durable_appends,
+            wal_sync_ops,
+            checkpoints,
+            auto_checkpoints,
+            checkpoint_total_ms,
+            flush_count_total,
+            flush_total_ms,
+            compact_count_total,
+            compact_total_ms,
+            embeddings_processed_total,
+            embeddings_failed_total,
+            embeddings_retried_total,
+        })
     }
 
     pub fn list_tables(&self) -> Result<Vec<String>> {
@@ -321,6 +425,14 @@ impl EmbedDb {
             embeddings_failed: failed,
             sst_files: table_state.sst_files.len(),
             next_row_id: table_state.next_row_id,
+            wal_durable_appends: table_state.metrics.wal_durable_appends,
+            embeddings_processed_total: table_state.metrics.embeddings_processed_total,
+            embeddings_failed_total: table_state.metrics.embeddings_failed_total,
+            embeddings_retried_total: table_state.metrics.embeddings_retried_total,
+            flush_count: table_state.metrics.flush_count,
+            flush_total_ms: table_state.metrics.flush_total_ms,
+            compact_count: table_state.metrics.compact_count,
+            compact_total_ms: table_state.metrics.compact_total_ms,
         })
     }
 
@@ -346,7 +458,7 @@ impl EmbedDb {
             schema: schema.clone(),
             embedding_spec: embedding_spec.clone(),
         };
-        inner.wal.append(&record, true)?;
+        append_durable_wal(&mut inner, Some(&name), &record)?;
 
         inner.state.tables.insert(
             name,
@@ -360,6 +472,7 @@ impl EmbedDb {
                 embedding_spec,
                 sst_files: Vec::new(),
                 next_sst_seq: 1,
+                metrics: TableRuntimeMetrics::default(),
             },
         );
 
@@ -390,7 +503,7 @@ impl EmbedDb {
             row: row.clone(),
         };
         // Primary write: durable first.
-        inner.wal.append(&record, true)?;
+        append_durable_wal(&mut inner, Some(table), &record)?;
 
         if let Some(table_state) = inner.state.tables.get_mut(table) {
             if table_state.next_row_id <= row_id {
@@ -407,7 +520,7 @@ impl EmbedDb {
                 row_id,
                 content_hash: content_hash.clone(),
             };
-            inner.wal.append(&job_record, true)?;
+            append_durable_wal(&mut inner, Some(table), &job_record)?;
 
             if let Some(table_state) = inner.state.tables.get_mut(table) {
                 table_state.embedding_meta.insert(
@@ -456,7 +569,7 @@ impl EmbedDb {
             row_id,
             row: row.clone(),
         };
-        inner.wal.append(&record, true)?;
+        append_durable_wal(&mut inner, Some(table), &record)?;
 
         if let Some(table_state) = inner.state.tables.get_mut(table) {
             table_state.rows.insert(row_id, row);
@@ -470,7 +583,7 @@ impl EmbedDb {
                 row_id,
                 content_hash: content_hash.clone(),
             };
-            inner.wal.append(&job_record, true)?;
+            append_durable_wal(&mut inner, Some(table), &job_record)?;
 
             if let Some(table_state) = inner.state.tables.get_mut(table) {
                 table_state.embedding_meta.insert(
@@ -508,7 +621,7 @@ impl EmbedDb {
             table: table.to_string(),
             row_id,
         };
-        inner.wal.append(&record, true)?;
+        append_durable_wal(&mut inner, Some(table), &record)?;
 
         if let Some(table_state) = inner.state.tables.get_mut(table) {
             table_state.rows.remove(&row_id);
@@ -546,6 +659,8 @@ impl EmbedDb {
                 status: meta.status,
                 content_hash: meta.content_hash.clone(),
                 last_error: meta.last_error.clone(),
+                attempts: meta.attempts,
+                next_retry_at_ms: meta.next_retry_at_ms,
             });
         }
 
@@ -592,7 +707,7 @@ impl EmbedDb {
                 attempts: Some(0),
                 next_retry_at_ms: Some(0),
             };
-            inner.wal.append(&status_record, true)?;
+            append_durable_wal(&mut inner, Some(table), &status_record)?;
 
             if let Some(table_state) = inner.state.tables.get_mut(table) {
                 if let Some(meta) = table_state.embedding_meta.get_mut(&id) {
@@ -600,8 +715,10 @@ impl EmbedDb {
                     meta.last_error = None;
                     meta.attempts = 0;
                     meta.next_retry_at_ms = 0;
+                    table_state.metrics.embeddings_retried_total += 1;
                 }
             }
+            inner.metrics.embeddings_retried_total += 1;
 
             retried += 1;
         }
@@ -689,7 +806,7 @@ impl EmbedDb {
                         row_id,
                         vector: vector.clone(),
                     };
-                    inner.wal.append(&store_record, true)?;
+                    append_durable_wal(&mut inner, Some(table), &store_record)?;
 
                     if let Some(table_state) = inner.state.tables.get_mut(table) {
                         table_state.embeddings.insert(row_id, vector);
@@ -703,7 +820,7 @@ impl EmbedDb {
                         attempts: Some(0),
                         next_retry_at_ms: Some(0),
                     };
-                    inner.wal.append(&status_record, true)?;
+                    append_durable_wal(&mut inner, Some(table), &status_record)?;
 
                     if let Some(table_state) = inner.state.tables.get_mut(table) {
                         if let Some(meta) = table_state.embedding_meta.get_mut(&row_id) {
@@ -711,8 +828,10 @@ impl EmbedDb {
                             meta.last_error = None;
                             meta.attempts = 0;
                             meta.next_retry_at_ms = 0;
+                            table_state.metrics.embeddings_processed_total += 1;
                         }
                     }
+                    inner.metrics.embeddings_processed_total += 1;
                 }
                 Err(err) => {
                     let mut inner = self.lock_inner()?;
@@ -751,7 +870,7 @@ impl EmbedDb {
                         attempts: Some(new_attempts),
                         next_retry_at_ms: Some(next_retry),
                     };
-                    inner.wal.append(&status_record, true)?;
+                    append_durable_wal(&mut inner, Some(table), &status_record)?;
 
                     if let Some(table_state) = inner.state.tables.get_mut(table) {
                         if let Some(meta) = table_state.embedding_meta.get_mut(&row_id) {
@@ -759,8 +878,10 @@ impl EmbedDb {
                             meta.last_error = Some(err.to_string());
                             meta.attempts = new_attempts;
                             meta.next_retry_at_ms = next_retry;
+                            table_state.metrics.embeddings_failed_total += 1;
                         }
                     }
+                    inner.metrics.embeddings_failed_total += 1;
                 }
             }
 
@@ -868,49 +989,80 @@ impl EmbedDb {
 
     pub fn flush_table(&self, table: &str) -> Result<()> {
         let mut inner = self.lock_inner()?;
-        let table_state = inner
-            .state
-            .tables
-            .get_mut(table)
-            .ok_or_else(|| anyhow!("table not found"))?;
-        flush_table_state(&self.config.data_dir, table, table_state)
+        let elapsed_ms = {
+            let table_state = inner
+                .state
+                .tables
+                .get_mut(table)
+                .ok_or_else(|| anyhow!("table not found"))?;
+            let started = Instant::now();
+            let flushed = flush_table_state(&self.config.data_dir, table, table_state)?;
+            if flushed {
+                let elapsed_ms = started.elapsed().as_millis() as u64;
+                table_state.metrics.flush_count += 1;
+                table_state.metrics.flush_total_ms = table_state
+                    .metrics
+                    .flush_total_ms
+                    .saturating_add(elapsed_ms);
+                Some(elapsed_ms)
+            } else {
+                None
+            }
+        };
+        if let Some(elapsed_ms) = elapsed_ms {
+            inner.metrics.flush_count_total += 1;
+            inner.metrics.flush_total_ms = inner.metrics.flush_total_ms.saturating_add(elapsed_ms);
+        }
+        Ok(())
     }
 
     pub fn compact_table(&self, table: &str) -> Result<()> {
         let mut inner = self.lock_inner()?;
-        let table_state = inner
-            .state
-            .tables
-            .get_mut(table)
-            .ok_or_else(|| anyhow!("table not found"))?;
+        let elapsed_ms = {
+            let table_state = inner
+                .state
+                .tables
+                .get_mut(table)
+                .ok_or_else(|| anyhow!("table not found"))?;
 
-        let level_zero: Vec<SstFile> = table_state
-            .sst_files
-            .iter()
-            .filter(|file| file.level == 0)
-            .cloned()
-            .collect();
-        if level_zero.is_empty() {
-            return Ok(());
-        }
+            let level_zero: Vec<SstFile> = table_state
+                .sst_files
+                .iter()
+                .filter(|file| file.level == 0)
+                .cloned()
+                .collect();
+            if level_zero.is_empty() {
+                return Ok(());
+            }
+            let started = Instant::now();
 
-        let dir = sst::table_dir(&self.config.data_dir, table);
-        sst::ensure_dir(&dir)?;
-        let seq = table_state.next_sst_seq;
-        table_state.next_sst_seq += 1;
+            let dir = sst::table_dir(&self.config.data_dir, table);
+            sst::ensure_dir(&dir)?;
+            let seq = table_state.next_sst_seq;
+            table_state.next_sst_seq += 1;
 
-        if let Some(new_file) = sst::compact_level_zero(&level_zero, &dir, seq)? {
-            sst::remove_files(&level_zero)?;
-            table_state.sst_files.retain(|file| file.level != 0);
-            table_state.sst_files.push(new_file);
-        }
+            if let Some(new_file) = sst::compact_level_zero(&level_zero, &dir, seq)? {
+                sst::remove_files(&level_zero)?;
+                table_state.sst_files.retain(|file| file.level != 0);
+                table_state.sst_files.push(new_file);
+            }
+
+            let elapsed_ms = started.elapsed().as_millis() as u64;
+            table_state.metrics.compact_count += 1;
+            table_state.metrics.compact_total_ms = table_state
+                .metrics
+                .compact_total_ms
+                .saturating_add(elapsed_ms);
+            elapsed_ms
+        };
+        inner.metrics.compact_count_total += 1;
+        inner.metrics.compact_total_ms = inner.metrics.compact_total_ms.saturating_add(elapsed_ms);
 
         Ok(())
     }
 
     pub fn checkpoint(&self) -> Result<CheckpointStats> {
-        let mut inner = self.lock_inner()?;
-        checkpoint_locked(&self.config.data_dir, &mut inner)
+        self.checkpoint_internal(false)
     }
 
     pub fn export_snapshot(&self, dest_dir: impl AsRef<Path>) -> Result<SnapshotStats> {
@@ -919,7 +1071,7 @@ impl EmbedDb {
 
         // Hold the DB lock for the entire operation so the snapshot is a consistent copy.
         let mut inner = self.lock_inner()?;
-        let _ = checkpoint_locked(&self.config.data_dir, &mut inner)?;
+        let _ = checkpoint_locked(&self.config.data_dir, &mut inner, false)?;
         let (files_copied, bytes_copied) = copy_dir_recursive_filtered(
             &self.config.data_dir,
             dest_dir,
@@ -960,7 +1112,20 @@ pub trait Embedder: Send + Sync {
     fn embed(&self, input: &str) -> Result<Vec<f32>>;
 }
 
-fn checkpoint_locked(data_dir: &Path, inner: &mut Inner) -> Result<CheckpointStats> {
+fn append_durable_wal(inner: &mut Inner, table: Option<&str>, record: &WalRecord) -> Result<()> {
+    inner.wal.append(record, true)?;
+    inner.metrics.wal_durable_appends += 1;
+    inner.metrics.wal_sync_ops += 1;
+    if let Some(table) = table {
+        if let Some(table_state) = inner.state.tables.get_mut(table) {
+            table_state.metrics.wal_durable_appends += 1;
+        }
+    }
+    Ok(())
+}
+
+fn checkpoint_locked(data_dir: &Path, inner: &mut Inner, auto: bool) -> Result<CheckpointStats> {
+    let checkpoint_started = Instant::now();
     let wal_path = data_dir.join("wal.log");
     let wal_prev_path = data_dir.join("wal.prev");
     let wal_new_path = data_dir.join("wal.log.new");
@@ -971,12 +1136,30 @@ fn checkpoint_locked(data_dir: &Path, inner: &mut Inner) -> Result<CheckpointSta
     // Flush all tables so row data is durably in SSTs and the checkpoint WAL can be compact.
     let table_names: Vec<String> = inner.state.tables.keys().cloned().collect();
     for table in table_names {
-        let table_state = inner
-            .state
-            .tables
-            .get_mut(&table)
-            .ok_or_else(|| anyhow!("table not found"))?;
-        flush_table_state(data_dir, &table, table_state)?;
+        let elapsed_ms = {
+            let table_state = inner
+                .state
+                .tables
+                .get_mut(&table)
+                .ok_or_else(|| anyhow!("table not found"))?;
+            let started = Instant::now();
+            let flushed = flush_table_state(data_dir, &table, table_state)?;
+            if flushed {
+                let elapsed_ms = started.elapsed().as_millis() as u64;
+                table_state.metrics.flush_count += 1;
+                table_state.metrics.flush_total_ms = table_state
+                    .metrics
+                    .flush_total_ms
+                    .saturating_add(elapsed_ms);
+                Some(elapsed_ms)
+            } else {
+                None
+            }
+        };
+        if let Some(elapsed_ms) = elapsed_ms {
+            inner.metrics.flush_count_total += 1;
+            inner.metrics.flush_total_ms = inner.metrics.flush_total_ms.saturating_add(elapsed_ms);
+        }
     }
 
     let mut records: Vec<WalRecord> = Vec::new();
@@ -1023,6 +1206,7 @@ fn checkpoint_locked(data_dir: &Path, inner: &mut Inner) -> Result<CheckpointSta
             new_wal.append(record, false)?;
         }
         new_wal.sync()?;
+        inner.metrics.wal_sync_ops += 1;
     }
 
     // Ensure `wal.log` is closed during rotation (important for Windows semantics).
@@ -1043,6 +1227,16 @@ fn checkpoint_locked(data_dir: &Path, inner: &mut Inner) -> Result<CheckpointSta
 
     let _ = fs::remove_file(&wal_dummy_path);
     let _ = fs::remove_file(&wal_prev_path);
+
+    let checkpoint_elapsed_ms = checkpoint_started.elapsed().as_millis() as u64;
+    inner.metrics.checkpoints += 1;
+    if auto {
+        inner.metrics.auto_checkpoints += 1;
+    }
+    inner.metrics.checkpoint_total_ms = inner
+        .metrics
+        .checkpoint_total_ms
+        .saturating_add(checkpoint_elapsed_ms);
 
     Ok(CheckpointStats {
         wal_bytes_before,
@@ -1258,6 +1452,7 @@ fn apply_record(state: &mut DbState, record: WalRecord) -> Result<()> {
                     embedding_spec,
                     sst_files: Vec::new(),
                     next_sst_seq: 1,
+                    metrics: TableRuntimeMetrics::default(),
                 },
             );
         }
@@ -1340,9 +1535,9 @@ fn flush_table_state(
     root: &std::path::Path,
     table: &str,
     table_state: &mut TableState,
-) -> Result<()> {
+) -> Result<bool> {
     if table_state.rows.is_empty() && table_state.tombstones.is_empty() {
-        return Ok(());
+        return Ok(false);
     }
 
     let dir = sst::table_dir(root, table);
@@ -1374,7 +1569,7 @@ fn flush_table_state(
     table_state.rows.clear();
     table_state.tombstones.clear();
 
-    Ok(())
+    Ok(true)
 }
 
 #[cfg(test)]

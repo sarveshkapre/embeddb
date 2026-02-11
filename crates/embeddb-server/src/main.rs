@@ -14,8 +14,8 @@ use std::sync::Arc;
 use anyhow::anyhow;
 #[cfg(feature = "http")]
 use embeddb::{
-    Config, DistanceMetric, EmbedDb, Embedder, EmbeddingSpec, FilterCondition, FilterOp,
-    TableSchema, Value,
+    Config, DistanceMetric, EmbedDb, Embedder, EmbeddingJob, EmbeddingSpec, FilterCondition,
+    FilterOp, TableSchema, Value,
 };
 #[cfg(feature = "http")]
 use serde::Deserialize;
@@ -278,14 +278,56 @@ mod contract_tests {
     fn db_stats_response_schema() {
         let schema = serde_json::json!({
             "type": "object",
-            "required": ["tables", "wal_bytes"],
+            "required": [
+                "tables",
+                "wal_bytes",
+                "wal_durable_appends",
+                "wal_sync_ops",
+                "checkpoints",
+                "auto_checkpoints",
+                "checkpoint_total_ms",
+                "flush_count_total",
+                "flush_total_ms",
+                "compact_count_total",
+                "compact_total_ms",
+                "embeddings_processed_total",
+                "embeddings_failed_total",
+                "embeddings_retried_total"
+            ],
             "properties": {
                 "tables": { "type": "integer", "minimum": 0 },
-                "wal_bytes": { "type": "integer", "minimum": 0 }
+                "wal_bytes": { "type": "integer", "minimum": 0 },
+                "wal_durable_appends": { "type": "integer", "minimum": 0 },
+                "wal_sync_ops": { "type": "integer", "minimum": 0 },
+                "checkpoints": { "type": "integer", "minimum": 0 },
+                "auto_checkpoints": { "type": "integer", "minimum": 0 },
+                "checkpoint_total_ms": { "type": "integer", "minimum": 0 },
+                "flush_count_total": { "type": "integer", "minimum": 0 },
+                "flush_total_ms": { "type": "integer", "minimum": 0 },
+                "compact_count_total": { "type": "integer", "minimum": 0 },
+                "compact_total_ms": { "type": "integer", "minimum": 0 },
+                "embeddings_processed_total": { "type": "integer", "minimum": 0 },
+                "embeddings_failed_total": { "type": "integer", "minimum": 0 },
+                "embeddings_retried_total": { "type": "integer", "minimum": 0 }
             }
         });
         let validator = compile_schema(schema);
-        let ok = serde_json::json!({ "tables": 2, "wal_bytes": 1234 });
+        let ok = serde_json::json!({
+            "tables": 2,
+            "wal_bytes": 1234,
+            "wal_durable_appends": 12,
+            "wal_sync_ops": 13,
+            "checkpoints": 1,
+            "auto_checkpoints": 0,
+            "checkpoint_total_ms": 25,
+            "flush_count_total": 2,
+            "flush_total_ms": 10,
+            "compact_count_total": 1,
+            "compact_total_ms": 3,
+            "embeddings_processed_total": 5,
+            "embeddings_failed_total": 1,
+            "embeddings_retried_total": 1
+        });
         assert!(validator.is_valid(&ok));
     }
 
@@ -424,7 +466,15 @@ mod contract_tests {
                 "embeddings_ready",
                 "embeddings_failed",
                 "sst_files",
-                "next_row_id"
+                "next_row_id",
+                "wal_durable_appends",
+                "embeddings_processed_total",
+                "embeddings_failed_total",
+                "embeddings_retried_total",
+                "flush_count",
+                "flush_total_ms",
+                "compact_count",
+                "compact_total_ms"
             ],
             "properties": {
                 "name": { "type": "string", "minLength": 1 },
@@ -435,7 +485,15 @@ mod contract_tests {
                 "embeddings_ready": { "type": "integer", "minimum": 0 },
                 "embeddings_failed": { "type": "integer", "minimum": 0 },
                 "sst_files": { "type": "integer", "minimum": 0 },
-                "next_row_id": { "type": "integer", "minimum": 1 }
+                "next_row_id": { "type": "integer", "minimum": 1 },
+                "wal_durable_appends": { "type": "integer", "minimum": 0 },
+                "embeddings_processed_total": { "type": "integer", "minimum": 0 },
+                "embeddings_failed_total": { "type": "integer", "minimum": 0 },
+                "embeddings_retried_total": { "type": "integer", "minimum": 0 },
+                "flush_count": { "type": "integer", "minimum": 0 },
+                "flush_total_ms": { "type": "integer", "minimum": 0 },
+                "compact_count": { "type": "integer", "minimum": 0 },
+                "compact_total_ms": { "type": "integer", "minimum": 0 }
             }
         });
         let validator = compile_schema(schema);
@@ -448,8 +506,58 @@ mod contract_tests {
             "embeddings_ready": 0,
             "embeddings_failed": 0,
             "sst_files": 0,
-            "next_row_id": 2
+            "next_row_id": 2,
+            "wal_durable_appends": 3,
+            "embeddings_processed_total": 1,
+            "embeddings_failed_total": 0,
+            "embeddings_retried_total": 0,
+            "flush_count": 0,
+            "flush_total_ms": 0,
+            "compact_count": 0,
+            "compact_total_ms": 0
         });
+        assert!(validator.is_valid(&ok));
+    }
+
+    #[test]
+    fn list_jobs_response_schema() {
+        let schema = serde_json::json!({
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": [
+                    "table",
+                    "row_id",
+                    "status",
+                    "content_hash",
+                    "last_error",
+                    "attempts",
+                    "next_retry_at_ms"
+                ],
+                "properties": {
+                    "table": { "type": "string", "minLength": 1 },
+                    "row_id": { "type": "integer", "minimum": 1 },
+                    "status": { "type": "string", "enum": ["Pending", "Ready", "Failed"] },
+                    "content_hash": { "type": "string" },
+                    "last_error": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+                    "attempts": { "type": "integer", "minimum": 0 },
+                    "next_retry_at_ms": { "type": "integer", "minimum": 0 }
+                }
+            }
+        });
+
+        let validator = compile_schema(schema);
+        let ok = serde_json::json!([
+            {
+                "table": "notes",
+                "row_id": 1,
+                "status": "Pending",
+                "content_hash": "abc",
+                "last_error": null,
+                "attempts": 1,
+                "next_retry_at_ms": 123
+            }
+        ]);
         assert!(validator.is_valid(&ok));
     }
 
@@ -671,6 +779,7 @@ fn build_router(state: Arc<AppState>) -> Router {
             "/tables/:table/rows/:row_id",
             get(get_row).delete(delete_row),
         )
+        .route("/tables/:table/jobs", get(list_jobs))
         .route("/tables/:table/search", post(search))
         .route("/tables/:table/search-text", post(search_text))
         .route("/tables/:table/jobs/process", post(process_jobs))
@@ -826,6 +935,18 @@ async fn table_stats(
     state
         .db
         .table_stats(&table)
+        .map(Json)
+        .map_err(|err| ApiError::bad_request(err.to_string()))
+}
+
+#[cfg(feature = "http")]
+async fn list_jobs(
+    State(state): State<Arc<AppState>>,
+    Path(table): Path<String>,
+) -> Result<Json<Vec<EmbeddingJob>>, ApiError> {
+    state
+        .db
+        .list_embedding_jobs(&table)
         .map(Json)
         .map_err(|err| ApiError::bad_request(err.to_string()))
 }
@@ -1196,6 +1317,30 @@ mod http_smoke_tests {
             .await
             .expect("response");
         assert_eq!(res.status(), StatusCode::OK);
+
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/tables/notes/jobs")
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(res.status(), StatusCode::OK);
+        let bytes = axum::body::to_bytes(res.into_body(), usize::MAX)
+            .await
+            .expect("body");
+        let jobs: serde_json::Value = serde_json::from_slice(&bytes).expect("json");
+        let attempts = jobs
+            .as_array()
+            .and_then(|v| v.first())
+            .and_then(|v| v.get("attempts"))
+            .and_then(|v| v.as_u64())
+            .expect("attempts");
+        assert_eq!(attempts, 0);
 
         let search_body = serde_json::json!({
             "query_text": "Hello\nWorld",

@@ -41,6 +41,9 @@ cargo run -p embeddb-cli -- --data-dir ./data-restored snapshot-restore ./snapsh
 # Table stats
 cargo run -p embeddb-cli -- table-stats notes
 
+# List embedding jobs (includes retry metadata: attempts/next_retry_at_ms)
+cargo run -p embeddb-cli -- jobs notes
+
 # Text search (embeds the query via the local hash embedder)
 cargo run -p embeddb-cli -- search-text notes --query-text "hello world" --k 5
 ```
@@ -64,9 +67,14 @@ creating tables, inserting rows, processing embeddings, and running text search.
 ## HTTP examples
 ```bash
 curl -s http://127.0.0.1:8080/health
+curl -s http://127.0.0.1:8080/stats
+curl -s http://127.0.0.1:8080/tables/notes/jobs
 curl -s -X POST http://127.0.0.1:8080/tables/notes/flush
 curl -s -X POST http://127.0.0.1:8080/tables/notes/compact
 ```
+
+`GET /stats` and `GET /tables/:table/stats` include runtime operation counters (durable WAL appends,
+job throughput/failures/retries, and flush/compact/checkpoint counters + durations).
 
 Filtered search (MVP `AND` filters: equality + numeric ranges):
 ```bash
