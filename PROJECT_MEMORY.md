@@ -15,7 +15,7 @@
   - `crates/embeddb-server/src/main.rs` (new jobs route + expanded contract schemas)
   - `scripts/http_process_smoke.sh` (stats + jobs assertions)
   - `README.md`, `docs/HTTP.md`, `CHANGELOG.md`
-- Commit: pending
+- Commit: `abea0e8d1da5a00065b691f8a7ee47b7be5ea6ca`
 - Confidence: high
 - Trust label: trusted
 - Follow-ups:
@@ -188,6 +188,8 @@
 - 2026-02-11: `cargo test -p embeddb-server --features http,contract-tests` (pass)
 - 2026-02-11: `bash scripts/http_process_smoke.sh` (pass)
 - 2026-02-11: `make check` (pass)
+- 2026-02-11: `gh run view 21896427971 --json status,conclusion` (pass: `completed/success`)
+- 2026-02-11: `gh run view 21896432069 --json status,conclusion` (pass: `completed/success`)
 - `cargo fmt --all` (pass)
 - `cargo clippy --workspace --all-targets -- -D warnings` (pass)
 - `cargo test --workspace` (pass)

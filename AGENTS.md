@@ -9,7 +9,7 @@
 
 ## Mutable Repo Facts
 - Objective: Keep embeddb production-ready. Current focus: EmbedDB. Find the highest-impact pending work, implement it, test it, and push to main.
-- Last updated: 2026-02-11T07:30:15Z
+- Last updated: 2026-02-11T07:35:21Z
 
 ## Verification Policy
 - Record exact verification commands and pass/fail outcomes in PROJECT_MEMORY.md.
