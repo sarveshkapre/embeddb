@@ -45,3 +45,14 @@
   - Switched scalar value unions to `anyOf` for the overlapping numeric domains.
 - Prevention rules:
   - For JSON Schema unions that include overlapping types (for example `integer` + `number`), prefer `anyOf` or make the branches mutually exclusive.
+
+### 2026-02-12T20:01:18Z | Codex execution failure
+- Date: 2026-02-12T20:01:18Z
+- Trigger: Codex execution failure
+- Impact: Repo session did not complete cleanly
+- Root Cause: codex exec returned a non-zero status
+- Fix: Captured failure logs and kept repository in a recoverable state
+- Prevention Rule: Re-run with same pass context and inspect pass log before retrying
+- Evidence: pass_log=logs/20260212-101456-embeddb-cycle-2.log
+- Commit: pending
+- Confidence: medium
