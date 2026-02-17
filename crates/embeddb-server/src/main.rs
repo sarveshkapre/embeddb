@@ -520,6 +520,57 @@ mod contract_tests {
     }
 
     #[test]
+    fn snapshot_export_request_schema() {
+        let schema = serde_json::json!({
+            "type": "object",
+            "required": ["dest_dir"],
+            "properties": {
+                "dest_dir": { "type": "string", "minLength": 1 }
+            }
+        });
+        let validator = compile_schema(schema);
+        let ok = serde_json::json!({ "dest_dir": "/tmp/embeddb-snapshot" });
+        assert!(validator.is_valid(&ok));
+        let invalid = serde_json::json!({});
+        assert!(!validator.is_valid(&invalid));
+    }
+
+    #[test]
+    fn snapshot_restore_request_schema() {
+        let schema = serde_json::json!({
+            "type": "object",
+            "required": ["snapshot_dir", "data_dir"],
+            "properties": {
+                "snapshot_dir": { "type": "string", "minLength": 1 },
+                "data_dir": { "type": "string", "minLength": 1 }
+            }
+        });
+        let validator = compile_schema(schema);
+        let ok = serde_json::json!({
+            "snapshot_dir": "/tmp/embeddb-snapshot",
+            "data_dir": "/tmp/embeddb-restore"
+        });
+        assert!(validator.is_valid(&ok));
+        let invalid = serde_json::json!({ "snapshot_dir": "/tmp/embeddb-snapshot" });
+        assert!(!validator.is_valid(&invalid));
+    }
+
+    #[test]
+    fn snapshot_response_schema() {
+        let schema = serde_json::json!({
+            "type": "object",
+            "required": ["files_copied", "bytes_copied"],
+            "properties": {
+                "files_copied": { "type": "integer", "minimum": 0 },
+                "bytes_copied": { "type": "integer", "minimum": 0 }
+            }
+        });
+        let validator = compile_schema(schema);
+        let ok = serde_json::json!({ "files_copied": 4, "bytes_copied": 1024 });
+        assert!(validator.is_valid(&ok));
+    }
+
+    #[test]
     fn list_jobs_response_schema() {
         let schema = serde_json::json!({
             "type": "array",
