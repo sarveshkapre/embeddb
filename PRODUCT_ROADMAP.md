@@ -18,16 +18,20 @@
 - M5 Stabilization And Release Readiness
 
 ## Current Milestone
-- M1 Foundation
+- M2 Core Features
 
 ## Brainstorming Queue
 - Keep a broad queue of aligned candidates across features, bugs, refactor, UI/UX, docs, and test hardening.
 
 ## Pending Features
-- Keep this section updated every cycle.
+- P0: Console operator workflows for production maintenance (jobs, checkpoint, snapshots).
+- P0: Better filtered search UX in web console.
+- P1: Console/API smoke tests that exercise real server startup + critical flows.
+- P1: Retrieval quality harness with fixed fixtures and ranking metrics regression checks.
+- P1: Hybrid search MVP (keyword + vector fusion) with deterministic scoring mode.
 
 ## Delivered Features
-- Keep dated entries with evidence links/commands.
+- 2026-02-17: Added world-state analysis and translated ecosystem signals into prioritized EmbedDB backlog in `docs/WORLD_STATE_2026.md`.
 
 ## Risks And Blockers
 - Track blockers and mitigation plans.
