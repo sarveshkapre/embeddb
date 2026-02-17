@@ -66,6 +66,7 @@ const ui = {
   processJobs: document.getElementById("process-jobs"),
   flushTable: document.getElementById("flush-table"),
   compactTable: document.getElementById("compact-table"),
+  checkpointDb: document.getElementById("checkpoint-db"),
   createTemplate: document.getElementById("create-template"),
   createName: document.getElementById("create-name"),
   createEmbedding: document.getElementById("create-embedding"),
@@ -386,6 +387,26 @@ async function compactTable() {
   }
 }
 
+async function checkpointDb() {
+  try {
+    setBusy(ui.checkpointDb, true);
+    const result = await api("/checkpoint", { method: "POST" });
+    showToast(
+      `Checkpoint complete (WAL ${result.wal_bytes_before} -> ${result.wal_bytes_after} bytes).`,
+      "success"
+    );
+    await loadDbStats();
+    if (state.selectedTable) {
+      await loadTable(state.selectedTable);
+      renderSelectedTable();
+    }
+  } catch (err) {
+    showToast(err.message, "error");
+  } finally {
+    setBusy(ui.checkpointDb, false);
+  }
+}
+
 async function runSearch() {
   if (!state.selectedTable) return showToast("Select a table first.", "error");
   const query_text = ui.searchQuery.value.trim();
@@ -523,6 +544,7 @@ function registerEvents() {
   ui.processJobs.addEventListener("click", processJobs);
   ui.flushTable.addEventListener("click", flushTable);
   ui.compactTable.addEventListener("click", compactTable);
+  ui.checkpointDb.addEventListener("click", checkpointDb);
   ui.searchRun.addEventListener("click", runSearch);
   ui.lookupRow.addEventListener("click", lookupRow);
   ui.demoSeed.addEventListener("click", seedDemo);
