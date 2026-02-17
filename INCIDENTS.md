@@ -1,5 +1,17 @@
 # INCIDENTS
 
+## 2026-02-17: Self-hosted preflight checked Rust components before toolchain setup
+- Status: fixed
+- Impact: Local self-hosted CI parity script failed early with `Missing rustfmt component` even though the workflow installs components in the toolchain step.
+- Detection: First run of `bash scripts/ci_local_self_hosted.sh`.
+- Root cause: `scripts/ci_self_hosted_preflight.sh` validated `rustfmt`/`clippy` before workflow/toolchain installation.
+- Fix:
+  - Relaxed preflight to validate base runtime/tooling only.
+  - Added explicit `rustup component add rustfmt clippy` to `scripts/ci_local_self_hosted.sh` for local parity execution.
+- Prevention rules:
+  - Preflight checks should validate prerequisites, not post-install state.
+  - Keep local parity scripts aligned with workflow ordering.
+
 ## 2026-02-09: Pending embedding jobs could stall after flush/reopen
 - Status: fixed
 - Impact: Rows with `pending` embedding metadata were skipped by processing if row data had moved from memtable to SST, leaving jobs indefinitely pending.

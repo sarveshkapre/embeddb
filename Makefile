@@ -1,6 +1,6 @@
 SHELL := /bin/bash
 
-.PHONY: setup dev test lint typecheck build check release fmt smoke-http smoke-http-console
+.PHONY: setup dev test lint typecheck build check release fmt smoke-http smoke-http-console ci-local-self-hosted
 
 setup:
 	cargo fetch
@@ -30,6 +30,9 @@ smoke-http:
 
 smoke-http-console:
 	bash scripts/http_console_smoke.sh
+
+ci-local-self-hosted:
+	bash scripts/ci_local_self_hosted.sh
 
 release:
 	cargo build --workspace --release

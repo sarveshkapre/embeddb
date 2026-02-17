@@ -97,6 +97,13 @@ bash scripts/http_process_smoke.sh
 bash scripts/http_console_smoke.sh
 ```
 
+Self-hosted CI setup and runner registration:
+```bash
+bash scripts/setup_self_hosted_runner.sh
+make ci-local-self-hosted
+```
+Guide: `docs/SELF_HOSTED_RUNNER.md`.
+
 Full HTTP reference: `docs/HTTP.md`.
 
 ## Repository layout

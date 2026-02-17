@@ -2,6 +2,28 @@
 
 ## Decisions
 
+### 2026-02-17: Move CI to self-hosted runners and add deterministic local validation path
+- Decision:
+  - Switched all GitHub Actions jobs to `runs-on: self-hosted`.
+  - Replaced hosted security-scan actions with CLI-based steps (`cargo audit`, `gitleaks detect`) to reduce hosted-runner coupling.
+  - Added runner preflight and bootstrap scripts: `scripts/ci_self_hosted_preflight.sh`, `scripts/setup_self_hosted_runner.sh`, `scripts/install_gitleaks.sh`.
+  - Added local end-to-end CI parity script `scripts/ci_local_self_hosted.sh` and `make ci-local-self-hosted`.
+  - Added self-hosted registration/setup guide `docs/SELF_HOSTED_RUNNER.md` and linked it from `README.md`.
+  - Updated `Cargo.lock` to resolve audit failures (`bytes` 1.11.1, `time` 0.3.47).
+- Why: Billing issues blocked hosted runners; this keeps CI operational on repository-controlled infrastructure while preserving quality/security checks.
+- Evidence:
+  - `.github/workflows/ci.yml`
+  - `scripts/ci_self_hosted_preflight.sh`
+  - `scripts/setup_self_hosted_runner.sh`
+  - `scripts/install_gitleaks.sh`
+  - `scripts/ci_local_self_hosted.sh`
+  - `docs/SELF_HOSTED_RUNNER.md`
+  - `README.md`
+  - `Cargo.lock`
+- Commit: pending
+- Confidence: high
+- Trust label: verified-local-smoke
+
 ### 2026-02-17: Align HTTP + console with operator-first production workflows
 - Decision:
   - Added HTTP snapshot endpoints (`POST /snapshot/export`, `POST /snapshot/restore`) with schema and smoke coverage.
@@ -198,6 +220,9 @@
 - Prevention rule: keep contract + process smoke coverage aligned whenever API payload fields are expanded.
 
 ## Verification Evidence
+- 2026-02-17: `bash scripts/ci_local_self_hosted.sh` (pass)
+- 2026-02-17: `cargo update -p bytes --precise 1.11.1` (pass)
+- 2026-02-17: `cargo update -p time --precise 0.3.47` (pass)
 - 2026-02-17: `make check` (pass)
 - 2026-02-17: `bash scripts/http_process_smoke.sh` (pass)
 - 2026-02-17: `bash scripts/http_console_smoke.sh` (pass)
