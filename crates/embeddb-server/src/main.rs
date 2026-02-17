@@ -772,6 +772,7 @@ fn build_router(state: Arc<AppState>) -> Router {
         .route("/stats", get(db_stats))
         .route("/checkpoint", post(checkpoint))
         .route("/snapshot/export", post(snapshot_export))
+        .route("/snapshot/restore", post(snapshot_restore))
         .route("/tables", get(list_tables).post(create_table))
         .route("/tables/:table", get(describe_table))
         .route("/tables/:table/stats", get(table_stats))
@@ -864,6 +865,30 @@ async fn snapshot_export(
     state
         .db
         .export_snapshot(path)
+        .map(Json)
+        .map_err(|err| ApiError::bad_request(err.to_string()))
+}
+
+#[cfg(feature = "http")]
+#[derive(Debug, Deserialize)]
+struct SnapshotRestoreRequest {
+    snapshot_dir: String,
+    data_dir: String,
+}
+
+#[cfg(feature = "http")]
+async fn snapshot_restore(
+    Json(req): Json<SnapshotRestoreRequest>,
+) -> Result<impl IntoResponse, ApiError> {
+    if req.snapshot_dir.trim().is_empty() {
+        return Err(ApiError::bad_request("snapshot_dir is required"));
+    }
+    if req.data_dir.trim().is_empty() {
+        return Err(ApiError::bad_request("data_dir is required"));
+    }
+    let snapshot_dir = PathBuf::from(req.snapshot_dir);
+    let data_dir = PathBuf::from(req.data_dir);
+    EmbedDb::restore_snapshot(snapshot_dir, data_dir)
         .map(Json)
         .map_err(|err| ApiError::bad_request(err.to_string()))
 }
