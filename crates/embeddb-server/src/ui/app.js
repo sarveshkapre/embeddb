@@ -91,6 +91,11 @@ const ui = {
   lookupId: document.getElementById("lookup-id"),
   lookupRow: document.getElementById("lookup-row"),
   lookupResult: document.getElementById("lookup-result"),
+  snapshotExportDir: document.getElementById("snapshot-export-dir"),
+  snapshotExport: document.getElementById("snapshot-export"),
+  snapshotRestoreSource: document.getElementById("snapshot-restore-source"),
+  snapshotRestoreTarget: document.getElementById("snapshot-restore-target"),
+  snapshotRestore: document.getElementById("snapshot-restore"),
   toast: document.getElementById("toast"),
 };
 
@@ -577,6 +582,49 @@ async function deleteRowById(id) {
   }
 }
 
+async function exportSnapshot() {
+  const dest_dir = ui.snapshotExportDir.value.trim();
+  if (!dest_dir) return showToast("Snapshot export dir is required.", "error");
+  try {
+    setBusy(ui.snapshotExport, true);
+    const result = await api("/snapshot/export", {
+      method: "POST",
+      body: JSON.stringify({ dest_dir }),
+    });
+    showToast(
+      `Snapshot exported (${result.files_copied} files, ${result.bytes_copied} bytes).`,
+      "success"
+    );
+  } catch (err) {
+    showToast(err.message, "error");
+  } finally {
+    setBusy(ui.snapshotExport, false);
+  }
+}
+
+async function restoreSnapshot() {
+  const snapshot_dir = ui.snapshotRestoreSource.value.trim();
+  const data_dir = ui.snapshotRestoreTarget.value.trim();
+  if (!snapshot_dir || !data_dir) {
+    return showToast("Restore source and target directories are required.", "error");
+  }
+  try {
+    setBusy(ui.snapshotRestore, true);
+    const result = await api("/snapshot/restore", {
+      method: "POST",
+      body: JSON.stringify({ snapshot_dir, data_dir }),
+    });
+    showToast(
+      `Snapshot restored (${result.files_copied} files, ${result.bytes_copied} bytes).`,
+      "success"
+    );
+  } catch (err) {
+    showToast(err.message, "error");
+  } finally {
+    setBusy(ui.snapshotRestore, false);
+  }
+}
+
 async function seedDemo() {
   ui.demoStatus.textContent = "Seeding demo…";
   try {
@@ -647,6 +695,8 @@ function registerEvents() {
   ui.checkpointDb.addEventListener("click", checkpointDb);
   ui.searchRun.addEventListener("click", runSearch);
   ui.lookupRow.addEventListener("click", lookupRow);
+  ui.snapshotExport.addEventListener("click", exportSnapshot);
+  ui.snapshotRestore.addEventListener("click", restoreSnapshot);
   ui.demoSeed.addEventListener("click", seedDemo);
   ui.demoSearch.addEventListener("click", () => {
     ui.searchQuery.value = "team meeting notes";

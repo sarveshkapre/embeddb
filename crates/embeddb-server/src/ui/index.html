@@ -200,6 +200,18 @@
                 <button class="btn btn-primary" id="lookup-row">Lookup</button>
               </div>
               <pre id="lookup-result" class="code-block"></pre>
+              <div class="form-row">
+                <label for="snapshot-export-dir">Snapshot export dir</label>
+                <input id="snapshot-export-dir" type="text" placeholder="/tmp/embeddb-snapshot" />
+                <button class="btn btn-small" id="snapshot-export">Export snapshot</button>
+              </div>
+              <div class="form-row">
+                <label for="snapshot-restore-source">Snapshot restore source dir</label>
+                <input id="snapshot-restore-source" type="text" placeholder="/tmp/embeddb-snapshot" />
+                <label for="snapshot-restore-target">Restore target data dir</label>
+                <input id="snapshot-restore-target" type="text" placeholder="/tmp/embeddb-restore" />
+                <button class="btn btn-small" id="snapshot-restore">Restore snapshot</button>
+              </div>
             </div>
           </div>
         </section>
