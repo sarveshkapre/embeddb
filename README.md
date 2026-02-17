@@ -64,6 +64,13 @@ EMBEDDB_WAL_AUTOCHECKPOINT_BYTES=50000000 cargo run -p embeddb-server --features
 When the HTTP server is running, open `http://127.0.0.1:8080` to use the built-in console for
 creating tables, inserting rows, processing embeddings, and running text search.
 
+Current console workflows include:
+- table + DB stats at a glance
+- embedding job queue inspection (`pending` / `ready` / `failed` with retry metadata)
+- retry-failed jobs and bounded processing (`limit`)
+- one-click checkpoint and snapshot export/restore actions
+- filter-aware text search and row-level inspect/delete actions
+
 ## HTTP examples
 ```bash
 curl -s http://127.0.0.1:8080/health
@@ -87,6 +94,7 @@ HTTP contract + route smoke tests:
 ```bash
 cargo test -p embeddb-server --features http,contract-tests
 bash scripts/http_process_smoke.sh
+bash scripts/http_console_smoke.sh
 ```
 
 Full HTTP reference: `docs/HTTP.md`.

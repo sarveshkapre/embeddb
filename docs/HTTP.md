@@ -23,6 +23,8 @@ insert rows, process embedding jobs, and run text search.
 This repo includes JSON Schema-based contract tests for request payloads and an HTTP route smoke test:
 ```bash
 cargo test -p embeddb-server --features http,contract-tests
+bash scripts/http_process_smoke.sh
+bash scripts/http_console_smoke.sh
 ```
 The contract tests also validate core response and error shapes, including list/describe/stats/search and row CRUD/flush/compact responses.
 
@@ -57,6 +59,33 @@ and rewrites `wal.log` to a minimal snapshot.
 
 ```bash
 curl -s -X POST http://127.0.0.1:8080/checkpoint
+```
+
+### Snapshot export
+`POST /snapshot/export`
+```json
+{
+  "dest_dir": "/tmp/embeddb-snapshot"
+}
+```
+```bash
+curl -s -X POST http://127.0.0.1:8080/snapshot/export \
+  -H "Content-Type: application/json" \
+  -d '{"dest_dir":"/tmp/embeddb-snapshot"}'
+```
+
+### Snapshot restore
+`POST /snapshot/restore`
+```json
+{
+  "snapshot_dir": "/tmp/embeddb-snapshot",
+  "data_dir": "/tmp/embeddb-restored"
+}
+```
+```bash
+curl -s -X POST http://127.0.0.1:8080/snapshot/restore \
+  -H "Content-Type: application/json" \
+  -d '{"snapshot_dir":"/tmp/embeddb-snapshot","data_dir":"/tmp/embeddb-restored"}'
 ```
 
 ### List tables

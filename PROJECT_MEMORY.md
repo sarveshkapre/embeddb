@@ -2,6 +2,22 @@
 
 ## Decisions
 
+### 2026-02-17: Align HTTP + console with operator-first production workflows
+- Decision:
+  - Added HTTP snapshot endpoints (`POST /snapshot/export`, `POST /snapshot/restore`) with schema and smoke coverage.
+  - Expanded built-in console workflows: DB stats strip, checkpoint action, jobs panel, retry-failed action, bounded process limit, filter-aware search, snapshot controls, row inspect/delete, auto-refresh, persisted preferences, and shortcut help modal.
+  - Added dedicated console process smoke script (`scripts/http_console_smoke.sh`) and Make targets (`smoke-http`, `smoke-http-console`).
+  - Documented 2026 ecosystem signals and mapped them to EmbedDB priorities (`docs/WORLD_STATE_2026.md` + roadmap update).
+- Why: Embedded DB users need one local operator surface for reliability tasks (checkpoint/snapshot/job drain) and retrieval tuning; this reduces operational friction and shortens time-to-first-value.
+- Evidence:
+  - `crates/embeddb-server/src/main.rs` (new snapshot HTTP handlers/routes + tests)
+  - `crates/embeddb-server/src/ui/index.html`, `crates/embeddb-server/src/ui/app.js`, `crates/embeddb-server/src/ui/styles.css`
+  - `scripts/http_console_smoke.sh`, `Makefile`
+  - `docs/WORLD_STATE_2026.md`, `PRODUCT_ROADMAP.md`, `README.md`, `docs/HTTP.md`
+- Commit: 2026-02-17 20-commit stack ending on `main`
+- Confidence: high
+- Trust label: verified-local-smoke
+
 ### 2026-02-11: Expand operator observability and job visibility surfaces
 - Decision:
   - Added runtime metrics accounting in core for durable WAL appends/syncs, job processing outcomes, and flush/compact/checkpoint counts + cumulative durations.
@@ -182,6 +198,12 @@
 - Prevention rule: keep contract + process smoke coverage aligned whenever API payload fields are expanded.
 
 ## Verification Evidence
+- 2026-02-17: `make check` (pass)
+- 2026-02-17: `bash scripts/http_process_smoke.sh` (pass)
+- 2026-02-17: `bash scripts/http_console_smoke.sh` (pass)
+- 2026-02-17: `cargo test -p embeddb-server --features contract-tests snapshot_` (pass)
+- 2026-02-17: `cargo test -p embeddb-server --features http snapshot_endpoints_work` (pass)
+- 2026-02-17: `cargo check -p embeddb-server --features http` (pass)
 - 2026-02-11: `cargo fmt --all` (pass)
 - 2026-02-11: `cargo clippy --workspace --all-targets -- -D warnings` (pass)
 - 2026-02-11: `cargo test --workspace` (pass)
