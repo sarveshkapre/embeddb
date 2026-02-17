@@ -5,6 +5,8 @@ const state = {
   stats: null,
   jobs: [],
   dbStats: null,
+  connected: false,
+  lastLatencyMs: null,
   autoProcessTimer: null,
   autoRefreshTimer: null,
 };
@@ -115,6 +117,18 @@ function showToast(message, tone = "default") {
   showToast._timer = window.setTimeout(() => ui.toast.classList.remove("show"), 2600);
 }
 
+function renderConnectionStatus() {
+  if (!state.connected) {
+    ui.health.textContent = "Disconnected";
+    return;
+  }
+  if (typeof state.lastLatencyMs === "number") {
+    ui.health.textContent = `Connected (${state.lastLatencyMs} ms)`;
+    return;
+  }
+  ui.health.textContent = "Connected";
+}
+
 function loadPrefs() {
   try {
     const raw = localStorage.getItem(PREFS_KEY);
@@ -130,11 +144,15 @@ function savePrefs(next) {
 }
 
 async function api(path, options = {}) {
+  const started = Date.now();
   const headers = options.headers || {};
   if (options.body && !headers["Content-Type"]) {
     headers["Content-Type"] = "application/json";
   }
   const res = await fetch(path, { ...options, headers });
+  state.lastLatencyMs = Date.now() - started;
+  state.connected = true;
+  renderConnectionStatus();
   const contentType = res.headers.get("content-type") || "";
   if (!res.ok) {
     let message = `${res.status} ${res.statusText}`;
@@ -157,9 +175,11 @@ async function api(path, options = {}) {
 async function checkHealth() {
   try {
     const health = await api("/health");
-    ui.health.textContent = health.status === "ok" ? "Connected" : "Unknown";
+    state.connected = health.status === "ok";
+    renderConnectionStatus();
   } catch (err) {
-    ui.health.textContent = "Disconnected";
+    state.connected = false;
+    renderConnectionStatus();
   }
 }
 
