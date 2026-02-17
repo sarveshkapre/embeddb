@@ -6,6 +6,7 @@ const state = {
   jobs: [],
   dbStats: null,
   autoProcessTimer: null,
+  autoRefreshTimer: null,
 };
 
 const PREFS_KEY = "embeddb-console-prefs-v1";
@@ -71,6 +72,7 @@ const ui = {
   tableSchema: document.getElementById("table-schema"),
   jobsList: document.getElementById("jobs-list"),
   jobsEmpty: document.getElementById("jobs-empty"),
+  autoRefresh: document.getElementById("auto-refresh"),
   processLimit: document.getElementById("process-limit"),
   processJobs: document.getElementById("process-jobs"),
   retryFailed: document.getElementById("retry-failed"),
@@ -704,6 +706,24 @@ function scheduleAutoProcess(enabled) {
   }, 3000);
 }
 
+function scheduleAutoRefresh(enabled) {
+  if (state.autoRefreshTimer) {
+    clearInterval(state.autoRefreshTimer);
+    state.autoRefreshTimer = null;
+  }
+  if (!enabled) return;
+  state.autoRefreshTimer = setInterval(async () => {
+    if (!state.selectedTable) return;
+    try {
+      await loadTable(state.selectedTable);
+      renderSelectedTable();
+      await loadDbStats();
+    } catch (_) {
+      // Silent background errors.
+    }
+  }, 5000);
+}
+
 function registerEvents() {
   ui.refreshTables.addEventListener("click", refreshTables);
   ui.createTable.addEventListener("click", createTable);
@@ -729,6 +749,11 @@ function registerEvents() {
     const checked = e.target.checked;
     savePrefs({ autoProcess: checked });
     scheduleAutoProcess(checked);
+  });
+  ui.autoRefresh.addEventListener("change", (e) => {
+    const checked = e.target.checked;
+    savePrefs({ autoRefresh: checked });
+    scheduleAutoRefresh(checked);
   });
   ui.searchK.addEventListener("change", () => savePrefs({ searchK: ui.searchK.value }));
   ui.searchMetric.addEventListener("change", () =>
@@ -774,6 +799,7 @@ async function init() {
   if (prefs.searchMetric) ui.searchMetric.value = String(prefs.searchMetric);
   if (prefs.processLimit) ui.processLimit.value = String(prefs.processLimit);
   if (prefs.autoProcess) ui.autoProcess.checked = true;
+  if (prefs.autoRefresh) ui.autoRefresh.checked = true;
   await checkHealth();
   await loadDbStats();
   await refreshTables();
@@ -782,6 +808,9 @@ async function init() {
   }
   if (prefs.autoProcess) {
     scheduleAutoProcess(true);
+  }
+  if (prefs.autoRefresh) {
+    scheduleAutoRefresh(true);
   }
   registerEvents();
 }

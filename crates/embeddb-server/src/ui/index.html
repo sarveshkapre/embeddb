@@ -71,6 +71,11 @@
                 <div class="panel-subtitle" id="table-selected">Select a table.</div>
               </div>
               <div class="panel-actions">
+                <label class="switch">
+                  <input type="checkbox" id="auto-refresh" />
+                  <span class="slider"></span>
+                  <span class="switch-label">Auto-refresh</span>
+                </label>
                 <input id="process-limit" type="number" min="1" placeholder="limit" />
                 <button class="btn btn-small" id="process-jobs">Process embeddings</button>
                 <button class="btn btn-small" id="retry-failed">Retry failed</button>
