@@ -8,6 +8,8 @@ const state = {
   autoProcessTimer: null,
 };
 
+const PREFS_KEY = "embeddb-console-prefs-v1";
+
 const demo = {
   name: "notes",
   schema: {
@@ -106,6 +108,20 @@ function showToast(message, tone = "default") {
     tone === "error" ? "#e5484d" : tone === "success" ? "#0f172a" : "#0f172a";
   window.clearTimeout(showToast._timer);
   showToast._timer = window.setTimeout(() => ui.toast.classList.remove("show"), 2600);
+}
+
+function loadPrefs() {
+  try {
+    const raw = localStorage.getItem(PREFS_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch (_) {
+    return {};
+  }
+}
+
+function savePrefs(next) {
+  const merged = { ...loadPrefs(), ...next };
+  localStorage.setItem(PREFS_KEY, JSON.stringify(merged));
 }
 
 async function api(path, options = {}) {
@@ -216,6 +232,7 @@ function renderTables() {
 
 async function selectTable(table) {
   state.selectedTable = table;
+  savePrefs({ selectedTable: table });
   renderTables();
   await loadTable(table);
   renderSelectedTable();
@@ -703,7 +720,18 @@ function registerEvents() {
     runSearch();
   });
   ui.createTemplate.addEventListener("change", (e) => applyTemplate(e.target.value));
-  ui.autoProcess.addEventListener("change", (e) => scheduleAutoProcess(e.target.checked));
+  ui.autoProcess.addEventListener("change", (e) => {
+    const checked = e.target.checked;
+    savePrefs({ autoProcess: checked });
+    scheduleAutoProcess(checked);
+  });
+  ui.searchK.addEventListener("change", () => savePrefs({ searchK: ui.searchK.value }));
+  ui.searchMetric.addEventListener("change", () =>
+    savePrefs({ searchMetric: ui.searchMetric.value })
+  );
+  ui.processLimit.addEventListener("change", () =>
+    savePrefs({ processLimit: ui.processLimit.value })
+  );
 
   document.addEventListener("keydown", (event) => {
     if (event.key === "/") {
@@ -717,10 +745,21 @@ function registerEvents() {
 }
 
 async function init() {
+  const prefs = loadPrefs();
   applyTemplate("notes");
+  if (prefs.searchK) ui.searchK.value = String(prefs.searchK);
+  if (prefs.searchMetric) ui.searchMetric.value = String(prefs.searchMetric);
+  if (prefs.processLimit) ui.processLimit.value = String(prefs.processLimit);
+  if (prefs.autoProcess) ui.autoProcess.checked = true;
   await checkHealth();
   await loadDbStats();
   await refreshTables();
+  if (prefs.selectedTable && state.tables.includes(prefs.selectedTable)) {
+    await selectTable(prefs.selectedTable);
+  }
+  if (prefs.autoProcess) {
+    scheduleAutoProcess(true);
+  }
   registerEvents();
 }
 
