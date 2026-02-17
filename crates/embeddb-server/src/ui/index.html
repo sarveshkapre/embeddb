@@ -160,6 +160,14 @@
                 <label for="search-query">Query</label>
                 <input id="search-query" type="text" placeholder="Try: team meeting notes" />
               </div>
+              <div class="form-row">
+                <label for="search-filter">Filter JSON array (optional)</label>
+                <textarea
+                  id="search-filter"
+                  rows="4"
+                  placeholder='[{"column":"tag","op":"Eq","value":"work"}]'
+                ></textarea>
+              </div>
               <div class="form-row form-inline">
                 <div>
                   <label for="search-k">Top K</label>

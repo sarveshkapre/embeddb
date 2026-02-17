@@ -81,6 +81,7 @@ const ui = {
   insertRow: document.getElementById("insert-row"),
   insertHint: document.getElementById("insert-hint"),
   searchQuery: document.getElementById("search-query"),
+  searchFilter: document.getElementById("search-filter"),
   searchK: document.getElementById("search-k"),
   searchMetric: document.getElementById("search-metric"),
   searchRun: document.getElementById("search-run"),
@@ -473,9 +474,17 @@ async function runSearch() {
     setBusy(ui.searchRun, true);
     const k = Number(ui.searchK.value || 5);
     const metric = ui.searchMetric.value;
+    let filter = undefined;
+    const rawFilter = ui.searchFilter.value.trim();
+    if (rawFilter) {
+      filter = JSON.parse(rawFilter);
+      if (!Array.isArray(filter)) {
+        throw new Error("Filter must be a JSON array.");
+      }
+    }
     const hits = await api(`/tables/${state.selectedTable}/search-text`, {
       method: "POST",
-      body: JSON.stringify({ query_text, k, metric }),
+      body: JSON.stringify({ query_text, k, metric, filter }),
     });
     if (hits.length === 0) {
       ui.searchResults.innerHTML = "";
