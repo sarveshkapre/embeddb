@@ -1523,4 +1523,80 @@ mod http_smoke_tests {
             .expect("response");
         assert_eq!(res.status(), StatusCode::OK);
     }
+
+    #[tokio::test]
+    async fn snapshot_endpoints_work() {
+        let dir = tempdir().expect("tempdir");
+        let db = EmbedDb::open(Config::new(dir.path().to_path_buf())).expect("open db");
+        let app = build_router(Arc::new(AppState { db }));
+
+        let create_body = serde_json::json!({
+            "name": "notes",
+            "schema": {
+                "columns": [
+                    { "name": "title", "data_type": "String", "nullable": false }
+                ]
+            },
+            "embedding_fields": ["title"]
+        });
+        let _ = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/tables")
+                    .header("content-type", "application/json")
+                    .body(Body::from(create_body.to_string()))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+
+        let snapshot_dir = tempdir().expect("snapshot dir");
+        let export_body =
+            serde_json::json!({ "dest_dir": snapshot_dir.path().join("snapshot-copy") });
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/snapshot/export")
+                    .header("content-type", "application/json")
+                    .body(Body::from(export_body.to_string()))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(res.status(), StatusCode::OK);
+        let bytes = axum::body::to_bytes(res.into_body(), usize::MAX)
+            .await
+            .expect("body");
+        let exported: serde_json::Value = serde_json::from_slice(&bytes).expect("json");
+        assert!(
+            exported
+                .get("files_copied")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0)
+                >= 1
+        );
+
+        let restore_target = snapshot_dir.path().join("restore-target");
+        let restore_body = serde_json::json!({
+            "snapshot_dir": snapshot_dir.path().join("snapshot-copy"),
+            "data_dir": restore_target
+        });
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/snapshot/restore")
+                    .header("content-type", "application/json")
+                    .body(Body::from(restore_body.to_string()))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(res.status(), StatusCode::OK);
+    }
 }
