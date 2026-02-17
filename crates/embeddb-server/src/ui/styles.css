@@ -178,6 +178,12 @@ body {
   flex-wrap: wrap;
 }
 
+.panel-actions input {
+  width: 84px;
+  font-size: 12px;
+  padding: 8px;
+}
+
 .panel-body {
   display: flex;
   flex-direction: column;

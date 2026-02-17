@@ -66,6 +66,7 @@ const ui = {
   tableSchema: document.getElementById("table-schema"),
   jobsList: document.getElementById("jobs-list"),
   jobsEmpty: document.getElementById("jobs-empty"),
+  processLimit: document.getElementById("process-limit"),
   processJobs: document.getElementById("process-jobs"),
   retryFailed: document.getElementById("retry-failed"),
   flushTable: document.getElementById("flush-table"),
@@ -379,7 +380,11 @@ async function processJobs() {
   if (!state.selectedTable) return showToast("Select a table first.", "error");
   try {
     setBusy(ui.processJobs, true);
-    const res = await api(`/tables/${state.selectedTable}/jobs/process`, { method: "POST" });
+    const limit = Number(ui.processLimit.value);
+    const suffix = Number.isFinite(limit) && limit > 0 ? `?limit=${limit}` : "";
+    const res = await api(`/tables/${state.selectedTable}/jobs/process${suffix}`, {
+      method: "POST",
+    });
     showToast(`Processed ${res.processed} embedding jobs.`, "success");
     await loadTable(state.selectedTable);
     renderSelectedTable();
