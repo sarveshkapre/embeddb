@@ -524,7 +524,22 @@ function renderResults(rows) {
         <span class="badge">distance ${hit.distance.toFixed(4)}</span>
       </div>
       <pre class="code-block">${fields}</pre>
+      <div class="result-actions">
+        <button class="btn btn-small" data-action="inspect" data-row-id="${hit.row_id}">Inspect</button>
+        <button class="btn btn-small" data-action="delete" data-row-id="${hit.row_id}">Delete</button>
+      </div>
     `;
+    card.querySelectorAll("button[data-action]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        const rowId = Number(button.dataset.rowId);
+        if (button.dataset.action === "inspect") {
+          await lookupRowById(rowId);
+        }
+        if (button.dataset.action === "delete") {
+          await deleteRowById(rowId);
+        }
+      });
+    });
     ui.searchResults.appendChild(card);
   });
 }
@@ -538,6 +553,26 @@ async function lookupRow() {
     ui.lookupResult.textContent = JSON.stringify(row, null, 2);
   } catch (err) {
     ui.lookupResult.textContent = "";
+    showToast(err.message, "error");
+  }
+}
+
+async function lookupRowById(id) {
+  ui.lookupId.value = String(id);
+  await lookupRow();
+}
+
+async function deleteRowById(id) {
+  if (!state.selectedTable) return;
+  try {
+    await api(`/tables/${state.selectedTable}/rows/${id}`, { method: "DELETE" });
+    showToast(`Deleted row ${id}.`, "success");
+    await loadTable(state.selectedTable);
+    renderSelectedTable();
+    if (ui.searchQuery.value.trim()) {
+      await runSearch();
+    }
+  } catch (err) {
     showToast(err.message, "error");
   }
 }

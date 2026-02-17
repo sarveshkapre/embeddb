@@ -379,6 +379,12 @@ textarea {
   margin-bottom: 6px;
 }
 
+.result-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
 .badge {
   background: var(--accent-soft);
   color: var(--accent);
