@@ -771,6 +771,7 @@ fn build_router(state: Arc<AppState>) -> Router {
         .route("/health", get(health))
         .route("/stats", get(db_stats))
         .route("/checkpoint", post(checkpoint))
+        .route("/snapshot/export", post(snapshot_export))
         .route("/tables", get(list_tables).post(create_table))
         .route("/tables/:table", get(describe_table))
         .route("/tables/:table/stats", get(table_stats))
@@ -841,6 +842,28 @@ async fn checkpoint(State(state): State<Arc<AppState>>) -> Result<impl IntoRespo
     state
         .db
         .checkpoint()
+        .map(Json)
+        .map_err(|err| ApiError::bad_request(err.to_string()))
+}
+
+#[cfg(feature = "http")]
+#[derive(Debug, Deserialize)]
+struct SnapshotExportRequest {
+    dest_dir: String,
+}
+
+#[cfg(feature = "http")]
+async fn snapshot_export(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<SnapshotExportRequest>,
+) -> Result<impl IntoResponse, ApiError> {
+    if req.dest_dir.trim().is_empty() {
+        return Err(ApiError::bad_request("dest_dir is required"));
+    }
+    let path = PathBuf::from(req.dest_dir);
+    state
+        .db
+        .export_snapshot(path)
         .map(Json)
         .map_err(|err| ApiError::bad_request(err.to_string()))
 }
