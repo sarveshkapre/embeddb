@@ -3,6 +3,7 @@ const state = {
   selectedTable: null,
   schema: null,
   stats: null,
+  dbStats: null,
   autoProcessTimer: null,
 };
 
@@ -55,6 +56,7 @@ const ui = {
   demoSeed: document.getElementById("demo-seed"),
   demoSearch: document.getElementById("demo-search"),
   demoStatus: document.getElementById("demo-status"),
+  dbStatsStrip: document.getElementById("db-stats-strip"),
   refreshTables: document.getElementById("refresh-tables"),
   tablesList: document.getElementById("tables-list"),
   tablesEmpty: document.getElementById("tables-empty"),
@@ -144,6 +146,7 @@ async function refreshTables() {
   try {
     const tables = await api("/tables");
     state.tables = tables;
+    await loadDbStats();
     renderTables();
     if (tables.length === 0) {
       ui.tablesEmpty.style.display = "block";
@@ -155,6 +158,32 @@ async function refreshTables() {
   } catch (err) {
     showToast(err.message, "error");
   }
+}
+
+async function loadDbStats() {
+  try {
+    state.dbStats = await api("/stats");
+    renderDbStats();
+  } catch (err) {
+    ui.dbStatsStrip.innerHTML = "";
+  }
+}
+
+function renderDbStats() {
+  if (!state.dbStats) {
+    ui.dbStatsStrip.innerHTML = "";
+    return;
+  }
+  const stats = state.dbStats;
+  const chips = [
+    `tables ${stats.tables}`,
+    `wal ${stats.wal_bytes} bytes`,
+    `checkpoints ${stats.checkpoints}`,
+    `embeddings processed ${stats.embeddings_processed_total}`,
+  ];
+  ui.dbStatsStrip.innerHTML = chips
+    .map((label) => `<span class="db-chip">${label}</span>`)
+    .join("");
 }
 
 function renderTables() {
@@ -518,6 +547,7 @@ function registerEvents() {
 async function init() {
   applyTemplate("notes");
   await checkHealth();
+  await loadDbStats();
   await refreshTables();
   registerEvents();
 }
