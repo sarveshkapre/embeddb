@@ -294,6 +294,24 @@ body {
   font-family: var(--mono);
 }
 
+.jobs-title {
+  font-size: 13px;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.job-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: center;
+}
+
+.job-meta {
+  font-size: 12px;
+  color: var(--muted);
+}
+
 .form-row {
   display: flex;
   flex-direction: column;

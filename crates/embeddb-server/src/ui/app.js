@@ -3,6 +3,7 @@ const state = {
   selectedTable: null,
   schema: null,
   stats: null,
+  jobs: [],
   dbStats: null,
   autoProcessTimer: null,
 };
@@ -63,6 +64,8 @@ const ui = {
   tableSelected: document.getElementById("table-selected"),
   tableStats: document.getElementById("table-stats"),
   tableSchema: document.getElementById("table-schema"),
+  jobsList: document.getElementById("jobs-list"),
+  jobsEmpty: document.getElementById("jobs-empty"),
   processJobs: document.getElementById("process-jobs"),
   flushTable: document.getElementById("flush-table"),
   compactTable: document.getElementById("compact-table"),
@@ -214,6 +217,7 @@ async function loadTable(table) {
   try {
     state.schema = await api(`/tables/${table}`);
     state.stats = await api(`/tables/${table}/stats`);
+    state.jobs = await api(`/tables/${table}/jobs`);
   } catch (err) {
     showToast(err.message, "error");
   }
@@ -224,16 +228,44 @@ function renderSelectedTable() {
     ui.tableSelected.textContent = "Select a table.";
     ui.tableStats.innerHTML = "";
     ui.tableSchema.innerHTML = "";
+    ui.jobsList.innerHTML = "";
+    ui.jobsEmpty.style.display = "block";
     ui.insertHint.textContent = "Select a table to insert rows.";
     return;
   }
   ui.tableSelected.textContent = state.selectedTable;
   renderStats();
   renderSchema();
+  renderJobs();
   ui.insertHint.textContent = `Insert into ${state.selectedTable}.`;
   if (!ui.insertJson.value) {
     ui.insertJson.value = JSON.stringify(sampleRowForSchema(), null, 2);
   }
+}
+
+function renderJobs() {
+  ui.jobsList.innerHTML = "";
+  if (!state.jobs || state.jobs.length === 0) {
+    ui.jobsEmpty.style.display = "block";
+    return;
+  }
+  ui.jobsEmpty.style.display = "none";
+  state.jobs.forEach((job) => {
+    const row = document.createElement("div");
+    row.className = "list-item";
+    const retryText =
+      job.next_retry_at_ms !== null && job.next_retry_at_ms !== undefined
+        ? `retry at ${job.next_retry_at_ms}`
+        : "ready now";
+    row.innerHTML = `
+      <div>
+        <div class="mono">row ${job.row_id}</div>
+        <div class="job-meta">attempts ${job.attempts} | ${retryText}</div>
+      </div>
+      <span class="badge">${job.status.toLowerCase()}</span>
+    `;
+    ui.jobsList.appendChild(row);
+  });
 }
 
 function renderStats() {
