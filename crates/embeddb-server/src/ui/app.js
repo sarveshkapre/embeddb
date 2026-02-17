@@ -56,6 +56,9 @@ const templates = {
 
 const ui = {
   health: document.getElementById("health-status"),
+  openShortcuts: document.getElementById("open-shortcuts"),
+  closeShortcuts: document.getElementById("close-shortcuts"),
+  shortcutsModal: document.getElementById("shortcuts-modal"),
   demoSeed: document.getElementById("demo-seed"),
   demoSearch: document.getElementById("demo-search"),
   demoStatus: document.getElementById("demo-status"),
@@ -714,6 +717,8 @@ function registerEvents() {
   ui.lookupRow.addEventListener("click", lookupRow);
   ui.snapshotExport.addEventListener("click", exportSnapshot);
   ui.snapshotRestore.addEventListener("click", restoreSnapshot);
+  ui.openShortcuts.addEventListener("click", () => toggleShortcuts(true));
+  ui.closeShortcuts.addEventListener("click", () => toggleShortcuts(false));
   ui.demoSeed.addEventListener("click", seedDemo);
   ui.demoSearch.addEventListener("click", () => {
     ui.searchQuery.value = "team meeting notes";
@@ -734,14 +739,32 @@ function registerEvents() {
   );
 
   document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      toggleShortcuts(false);
+      return;
+    }
+    if (event.key === "?" || (event.key === "/" && event.shiftKey)) {
+      event.preventDefault();
+      toggleShortcuts();
+      return;
+    }
     if (event.key === "/") {
       event.preventDefault();
       ui.searchQuery.focus();
+      return;
     }
     if (event.key.toLowerCase() === "i") {
       ui.insertJson.focus();
     }
   });
+}
+
+function toggleShortcuts(forceOpen) {
+  const shouldOpen =
+    typeof forceOpen === "boolean"
+      ? forceOpen
+      : ui.shortcutsModal.classList.contains("hidden");
+  ui.shortcutsModal.classList.toggle("hidden", !shouldOpen);
 }
 
 async function init() {

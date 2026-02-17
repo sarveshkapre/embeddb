@@ -13,7 +13,10 @@
           <div class="brand-title">EmbedDB Console</div>
           <div class="brand-subtitle">Local-first vector search database</div>
         </div>
-        <div class="status-pill" id="health-status">Checking…</div>
+        <div class="panel-actions">
+          <button class="btn btn-small" id="open-shortcuts">Shortcuts</button>
+          <div class="status-pill" id="health-status">Checking…</div>
+        </div>
       </header>
 
       <main class="main">
@@ -216,6 +219,21 @@
           </div>
         </section>
       </main>
+    </div>
+
+    <div class="modal hidden" id="shortcuts-modal">
+      <div class="modal-card">
+        <div class="panel-header">
+          <div class="panel-title">Keyboard shortcuts</div>
+          <button class="btn btn-small" id="close-shortcuts">Close</button>
+        </div>
+        <div class="shortcut-list">
+          <div><span class="kbd">/</span> Focus search query</div>
+          <div><span class="kbd">i</span> Focus insert JSON</div>
+          <div><span class="kbd">?</span> Toggle this dialog</div>
+          <div><span class="kbd">Esc</span> Close dialog</div>
+        </div>
+      </div>
     </div>
 
     <div class="toast" id="toast"></div>
