@@ -67,6 +67,7 @@ const ui = {
   jobsList: document.getElementById("jobs-list"),
   jobsEmpty: document.getElementById("jobs-empty"),
   processJobs: document.getElementById("process-jobs"),
+  retryFailed: document.getElementById("retry-failed"),
   flushTable: document.getElementById("flush-table"),
   compactTable: document.getElementById("compact-table"),
   checkpointDb: document.getElementById("checkpoint-db"),
@@ -389,6 +390,23 @@ async function processJobs() {
   }
 }
 
+async function retryFailedJobs() {
+  if (!state.selectedTable) return showToast("Select a table first.", "error");
+  try {
+    setBusy(ui.retryFailed, true);
+    const result = await api(`/tables/${state.selectedTable}/jobs/retry-failed`, {
+      method: "POST",
+    });
+    showToast(`Retried ${result.retried} failed jobs.`, "success");
+    await loadTable(state.selectedTable);
+    renderSelectedTable();
+  } catch (err) {
+    showToast(err.message, "error");
+  } finally {
+    setBusy(ui.retryFailed, false);
+  }
+}
+
 async function flushTable() {
   if (!state.selectedTable) return showToast("Select a table first.", "error");
   try {
@@ -574,6 +592,7 @@ function registerEvents() {
   ui.createTable.addEventListener("click", createTable);
   ui.insertRow.addEventListener("click", insertRow);
   ui.processJobs.addEventListener("click", processJobs);
+  ui.retryFailed.addEventListener("click", retryFailedJobs);
   ui.flushTable.addEventListener("click", flushTable);
   ui.compactTable.addEventListener("click", compactTable);
   ui.checkpointDb.addEventListener("click", checkpointDb);
